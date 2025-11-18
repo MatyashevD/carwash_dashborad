@@ -77,6 +77,25 @@ def categorize_by_phone(phone: str) -> str:
     return "Лейка"
 
 
+def compare_washes(df1, df2, name1, name2):
+    """Сравнивает уникальные мойки между двумя датафреймами."""
+    washes1 = set(df1["wash_key"].dropna().unique())
+    washes2 = set(df2["wash_key"].dropna().unique())
+    
+    only_in_1 = washes1 - washes2  # Мойки только в первом файле
+    only_in_2 = washes2 - washes1  # Мойки только во втором файле
+    common = washes1 & washes2      # Общие мойки
+    
+    return {
+        "only_in_1": sorted(only_in_1),
+        "only_in_2": sorted(only_in_2),
+        "common": sorted(common),
+        "count_1": len(washes1),
+        "count_2": len(washes2),
+        "count_common": len(common),
+    }
+
+
 def main():
     st.set_page_config(page_title="Carwash Dashboard", layout="wide")
     st.title("Дашборд по автомойкам (orderTable)")
@@ -98,6 +117,41 @@ def main():
     file_labels = [f.name for f in uploaded_files]
     selected_label = st.sidebar.selectbox("Выберите файл", file_labels)
     selected_file = next(f for f in uploaded_files if f.name == selected_label)
+
+    # Сравнение файлов (если загружено больше одного)
+    if len(uploaded_files) > 1:
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("🔍 Сравнение файлов")
+        
+        compare_file1 = st.sidebar.selectbox(
+            "Первый файл для сравнения",
+            file_labels,
+            index=0,
+            key="compare_file1"
+        )
+        compare_file2 = st.sidebar.selectbox(
+            "Второй файл для сравнения",
+            file_labels,
+            index=min(1, len(file_labels) - 1),
+            key="compare_file2"
+        )
+        
+        if compare_file1 != compare_file2:
+            if st.sidebar.button("Сравнить мойки"):
+                df1_compare = load_data(next(f for f in uploaded_files if f.name == compare_file1))
+                df2_compare = load_data(next(f for f in uploaded_files if f.name == compare_file2))
+                
+                comparison = compare_washes(df1_compare, df2_compare, compare_file1, compare_file2)
+                
+                st.sidebar.write(f"**{compare_file1}:** {comparison['count_1']} моек")
+                st.sidebar.write(f"**{compare_file2}:** {comparison['count_2']} моек")
+                st.sidebar.write(f"**Общих моек:** {comparison['count_common']}")
+                st.sidebar.write(f"**Только в {compare_file1}:** {len(comparison['only_in_1'])}")
+                st.sidebar.write(f"**Только в {compare_file2}:** {len(comparison['only_in_2'])}")
+                
+                # Сохраняем результат сравнения в session state для отображения
+                st.session_state['comparison'] = comparison
+                st.session_state['compare_names'] = (compare_file1, compare_file2)
 
     df = load_data(selected_file)
     
@@ -268,6 +322,29 @@ def main():
         f"{yandex_total:,.0f}".replace(",", " "),
         help=f"Записей: {yandex_count}"
     )
+
+    # --- Сравнение файлов ---
+    if 'comparison' in st.session_state and 'compare_names' in st.session_state:
+        st.markdown("---")
+        st.subheader("🔍 Сравнение моек между файлами")
+        
+        comparison = st.session_state['comparison']
+        name1, name2 = st.session_state['compare_names']
+        
+        col_comp1, col_comp2, col_comp3 = st.columns(3)
+        col_comp1.metric(f"Моек в {name1}", comparison['count_1'])
+        col_comp2.metric(f"Моек в {name2}", comparison['count_2'])
+        col_comp3.metric("Общих моек", comparison['count_common'])
+        
+        if comparison['only_in_1']:
+            with st.expander(f"❌ Мойки только в {name1} ({len(comparison['only_in_1'])})", expanded=True):
+                for wash in comparison['only_in_1']:
+                    st.write(f"- {wash}")
+        
+        if comparison['only_in_2']:
+            with st.expander(f"✅ Мойки только в {name2} ({len(comparison['only_in_2'])})", expanded=True):
+                for wash in comparison['only_in_2']:
+                    st.write(f"- {wash}")
 
     # --- Динамика по дням ---
     st.markdown("---")
