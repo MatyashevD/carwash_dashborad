@@ -48,7 +48,8 @@ def load_data(file) -> pd.DataFrame:
 
 def categorize_by_phone(phone: str) -> str:
     """Категоризирует по телефону: Яндекс (133133133133) или Лейка (всё остальное)."""
-    phone_str = str(phone).strip()
+    # Нормализуем телефон: убираем пробелы, дефисы, скобки и т.д.
+    phone_str = str(phone).strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "").replace("+", "")
     if phone_str == YANDEX_PHONE:
         return "Яндекс"
     return "Лейка"
@@ -77,6 +78,11 @@ def main():
     selected_file = next(f for f in uploaded_files if f.name == selected_label)
 
     df = load_data(selected_file)
+    
+    # Применяем категоризацию к исходным данным ДО фильтрации
+    df = df.assign(
+        partner_category=df["Телефон"].apply(categorize_by_phone)
+    )
 
     st.sidebar.markdown("---")
     st.sidebar.header("Фильтры")
@@ -97,14 +103,12 @@ def main():
 
     # Исключить Яндекс
     exclude_yandex = st.sidebar.checkbox(
-        "Исключить Яндекс (133133133133)", value=True
+        "Исключить Яндекс (133133133133)", value=False
     )
 
     filtered = df.copy()
     if exclude_yandex:
-        filtered = filtered[
-            filtered["Телефон"].astype(str).str.strip() != YANDEX_PHONE
-        ]
+        filtered = filtered[filtered["partner_category"] != "Яндекс"]
 
     # Фильтры по партнёру / автомойке / адресу
     partners = sorted(
@@ -133,9 +137,6 @@ def main():
         mask &= filtered["Адрес"].isin(addr_sel)
 
     filtered = filtered[mask]
-    filtered = filtered.assign(
-        partner_category=filtered["Телефон"].apply(categorize_by_phone)
-    )
 
     st.caption(
         f"Текущий файл: **{selected_label}**, записей после фильтров: **{len(filtered)}**"
