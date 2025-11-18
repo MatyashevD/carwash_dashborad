@@ -114,6 +114,69 @@ def get_period_label(df):
         return f"{min_date.strftime('%d.%m.%Y')} - {max_date.strftime('%d.%m.%Y')}"
 
 
+def group_transactions_to_visits(df, time_window_minutes=30):
+    """
+    Группирует транзакции одного клиента в визиты.
+    Транзакции одного клиента в пределах time_window_minutes считаются одним визитом.
+    
+    Returns:
+        DataFrame с колонкой 'visit_total' - сумма транзакций в рамках визита
+    """
+    if df.empty or "Дата оплаты" not in df.columns or "Телефон" not in df.columns:
+        return df
+    
+    df_work = df.copy()
+    # Убираем записи без даты или телефона
+    df_work = df_work.dropna(subset=["Дата оплаты", "Телефон"])
+    if df_work.empty:
+        return pd.DataFrame(columns=["visit_id", "visit_total", "Оплачено деньгами", "Оплачено бонусами", "Поступило на бокс", "Телефон", "Дата оплаты"])
+    
+    df_work = df_work.sort_values(["Телефон", "Дата оплаты"])
+    
+    # Создаём идентификатор визита
+    df_work["visit_id"] = None
+    
+    current_visit_id = 0
+    last_phone = None
+    last_datetime = None
+    
+    for idx, row in df_work.iterrows():
+        phone = str(row["Телефон"]).strip()
+        current_datetime = row["Дата оплаты"]
+        
+        # Пропускаем если дата невалидна
+        if pd.isna(current_datetime):
+            continue
+        
+        # Если новый клиент или прошло больше time_window_minutes с последней транзакции
+        if (last_phone is None or 
+            phone != last_phone or 
+            last_datetime is None or
+            (current_datetime - last_datetime).total_seconds() / 60 > time_window_minutes):
+            current_visit_id += 1
+        
+        df_work.at[idx, "visit_id"] = current_visit_id
+        last_phone = phone
+        last_datetime = current_datetime
+    
+    # Группируем по визитам и суммируем транзакции
+    visits = (
+        df_work.groupby("visit_id")
+        .agg({
+            "total": "sum",
+            "Оплачено деньгами": "sum",
+            "Оплачено бонусами": "sum",
+            "Поступило на бокс": "sum",
+            "Телефон": "first",
+            "Дата оплаты": "first"
+        })
+        .reset_index()
+    )
+    visits = visits.rename(columns={"total": "visit_total"})
+    
+    return visits
+
+
 def compare_washes(df1, df2, name1, name2):
     """Сравнивает уникальные мойки между двумя датафреймами."""
     washes1 = set(df1["wash_key"].dropna().unique())
@@ -308,8 +371,16 @@ def main():
     total_sum = filtered["total"].sum()
     cashback_sum = filtered["Начислено кешбека"].sum()
 
-    avg_check = filtered["total"].mean()
-    median_check = filtered["total"].median()
+    # Группируем транзакции в визиты (транзакции одного клиента в пределах 30 минут = один визит)
+    visits = group_transactions_to_visits(filtered, time_window_minutes=30)
+    
+    # Средний чек считаем по визитам, а не по отдельным транзакциям
+    avg_check = visits["visit_total"].mean() if len(visits) > 0 else 0.0
+    median_check = visits["visit_total"].median() if len(visits) > 0 else 0.0
+    
+    # Для сравнения показываем также средний чек по транзакциям (старый способ)
+    avg_check_by_transactions = filtered["total"].mean()
+    
     bonus_share = total_bonus / total_sum * 100 if total_sum > 0 else 0.0
 
     col1, col2, col3, col4 = st.columns(4)
@@ -325,9 +396,13 @@ def main():
         "Всего операций",
         f"{len(filtered):,}".replace(",", " "),
     )
+    # Показываем средний чек по визитам с информацией о количестве визитов
+    num_visits = len(visits)
+    num_transactions = len(filtered)
     col4.metric(
         "Средний чек (₽)",
         f"{avg_check:,.2f}".replace(",", " "),
+        help=f"По визитам (визитов: {num_visits:,}, транзакций: {num_transactions:,})"
     )
 
     col5, col6, col7, col8 = st.columns(4)
