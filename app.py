@@ -8,7 +8,8 @@ YANDEX_PHONE = "133133133133"
 @st.cache_data
 def load_data(file) -> pd.DataFrame:
     """Читает CSV в формате orderTable, приводит числа и даты."""
-    df = pd.read_csv(file, sep=";", encoding="utf-8-sig")
+    # Читаем CSV как строки, чтобы не потерять научную нотацию в телефонах
+    df = pd.read_csv(file, sep=";", encoding="utf-8-sig", dtype=str)
 
     # Приводим числовые колонки
     num_cols = [
@@ -47,11 +48,25 @@ def load_data(file) -> pd.DataFrame:
 
 
 def normalize_phone(phone) -> str:
-    """Нормализует телефон: убирает все нецифровые символы."""
+    """Нормализует телефон: обрабатывает научную нотацию и убирает все нецифровые символы."""
     phone_str = str(phone).strip()
-    # Убираем все символы кроме цифр
-    phone_str = ''.join(filter(str.isdigit, phone_str))
-    return phone_str
+    
+    # Если это NaN или пустая строка
+    if phone_str.lower() in ['nan', 'none', '']:
+        return ""
+    
+    # Пытаемся обработать научную нотацию (например, "1.33133e+11" или "1,33133E+11")
+    try:
+        # Заменяем запятую на точку для десятичных разделителей
+        phone_clean = phone_str.replace(",", ".")
+        # Пытаемся преобразовать в float, затем в int
+        phone_float = float(phone_clean)
+        phone_int = int(phone_float)
+        return str(phone_int)
+    except (ValueError, OverflowError):
+        # Если не получилось (не число), убираем все символы кроме цифр
+        phone_str = ''.join(filter(str.isdigit, phone_str))
+        return phone_str
 
 
 def categorize_by_phone(phone: str) -> str:
