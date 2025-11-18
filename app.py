@@ -1,11 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import re
 
 YANDEX_PHONE = "133133133133"
-LEYKA_PARTNER_KEYWORDS = ["лейка", "leyka"]
-YANDEX_PARTNER_KEYWORDS = ["яндекс", "yandex"]
 
 
 @st.cache_data
@@ -49,16 +46,12 @@ def load_data(file) -> pd.DataFrame:
     return df
 
 
-def categorize_partner(name: str) -> str:
-    """Возвращает агрегированную категорию партнёра."""
-    value = str(name).strip().lower()
-    value = value.replace("ё", "е")
-    value = re.sub(r"\s+", " ", value)
-    if any(keyword in value for keyword in LEYKA_PARTNER_KEYWORDS):
-        return "Лейка"
-    if any(keyword in value for keyword in YANDEX_PARTNER_KEYWORDS):
+def categorize_by_phone(phone: str) -> str:
+    """Категоризирует по телефону: Яндекс (133133133133) или Лейка (всё остальное)."""
+    phone_str = str(phone).strip()
+    if phone_str == YANDEX_PHONE:
         return "Яндекс"
-    return "Прочие"
+    return "Лейка"
 
 
 def main():
@@ -141,7 +134,7 @@ def main():
 
     filtered = filtered[mask]
     filtered = filtered.assign(
-        partner_category=filtered["Партнёр"].apply(categorize_partner)
+        partner_category=filtered["Телефон"].apply(categorize_by_phone)
     )
 
     st.caption(
