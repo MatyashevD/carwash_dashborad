@@ -557,13 +557,29 @@ def main():
             help=f"Количество уникальных клиентов"
         )
         
-        # Топ-10 клиентов по LTV (исключаем Яндекс)
+        # Топ-10 клиентов по LTV (исключаем Яндекс и клиентов только с бонусами)
         # Фильтруем клиентов Яндекса (телефон 133133133133)
         ltv_data_filtered = ltv_data[
             ltv_data["Телефон"].apply(normalize_phone) != YANDEX_PHONE
         ].copy()
         
-        st.markdown("**Топ-10 клиентов по LTV (без Яндекс):**")
+        # Исключаем клиентов, которые оплачивают только бонусами (владельцы/операторы)
+        # Проверяем, есть ли у клиента хотя бы одна транзакция с оплатой деньгами
+        clients_with_cash = (
+            filtered.groupby("Телефон")["Оплачено деньгами"]
+            .sum()
+            .reset_index()
+        )
+        clients_with_cash = clients_with_cash[
+            clients_with_cash["Оплачено деньгами"] > 0
+        ]["Телефон"].tolist()
+        
+        # Оставляем только клиентов, у которых есть оплата деньгами
+        ltv_data_filtered = ltv_data_filtered[
+            ltv_data_filtered["Телефон"].isin(clients_with_cash)
+        ].copy()
+        
+        st.markdown("**Топ-10 клиентов по LTV (без Яндекс и только бонусных):**")
         top_10_ltv = ltv_data_filtered.head(10).copy()
         top_10_ltv_display = top_10_ltv.copy()
         top_10_ltv_display["LTV_formatted"] = top_10_ltv_display["LTV"].apply(lambda x: f"{x:,.2f}".replace(",", " "))
