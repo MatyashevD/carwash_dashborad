@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 
 YANDEX_PHONE = "133133133133"
+LEYKA_PARTNER_KEYWORDS = ["лейка"]
+YANDEX_PARTNER_KEYWORDS = ["яндекс"]
 
 
 @st.cache_data
@@ -44,6 +46,16 @@ def load_data(file) -> pd.DataFrame:
     df["wash_key"] = df["Партнёр"] + " | " + df["Автомойка"] + " | " + df["Адрес"]
 
     return df
+
+
+def categorize_partner(name: str) -> str:
+    """Возвращает агрегированную категорию партнёра."""
+    value = str(name).strip().lower()
+    if any(keyword in value for keyword in LEYKA_PARTNER_KEYWORDS):
+        return "Лейка"
+    if any(keyword in value for keyword in YANDEX_PARTNER_KEYWORDS):
+        return "Яндекс"
+    return "Прочие"
 
 
 def main():
@@ -125,6 +137,9 @@ def main():
         mask &= filtered["Адрес"].isin(addr_sel)
 
     filtered = filtered[mask]
+    filtered = filtered.assign(
+        partner_category=filtered["Партнёр"].apply(categorize_partner)
+    )
 
     st.caption(
         f"Текущий файл: **{selected_label}**, записей после фильтров: **{len(filtered)}**"
@@ -194,6 +209,22 @@ def main():
         f"**Сумма кешбека:** {cashback_sum:,.0f} ₽".replace(",", " ")
     )
 
+    leyka_total = filtered.loc[
+        filtered["partner_category"] == "Лейка", "total"
+    ].sum()
+    yandex_total = filtered.loc[
+        filtered["partner_category"] == "Яндекс", "total"
+    ].sum()
+    col_partner1, col_partner2 = st.columns(2)
+    col_partner1.metric(
+        "Выручка Лейка (₽)",
+        f"{leyka_total:,.0f}".replace(",", " "),
+    )
+    col_partner2.metric(
+        "Выручка Яндекс (₽)",
+        f"{yandex_total:,.0f}".replace(",", " "),
+    )
+
     # --- Динамика по дням ---
     st.markdown("---")
     st.subheader("Динамика по дням")
@@ -218,6 +249,31 @@ def main():
         daily.set_index("date")["revenue"], use_container_width=True
     )
     col_d2.caption("Выручка по дням (Поступило на бокс)")
+
+    st.markdown("---")
+    st.subheader("Динамика выручки Лейка vs Яндекс")
+
+    partner_daily = (
+        filtered[filtered["partner_category"].isin(["Лейка", "Яндекс"])]
+        .groupby(["date", "partner_category"])
+        .agg(revenue=("Поступило на бокс", "sum"))
+        .reset_index()
+    )
+
+    if partner_daily.empty:
+        st.info("Нет данных по выбранным фильтрам для партнёров Лейка и Яндекс.")
+    else:
+        partner_pivot = (
+            partner_daily.pivot(
+                index="date", columns="partner_category", values="revenue"
+            )
+            .fillna(0)
+            .sort_index()
+        )
+        st.line_chart(partner_pivot, use_container_width=True)
+        st.caption(
+            "Сравнение суммарной выручки (Поступило на бокс) по дням для партнёров Лейка и Яндекс."
+        )
 
     # --- Топ мойки ---
     st.markdown("---")
