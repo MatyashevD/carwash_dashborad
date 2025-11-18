@@ -77,6 +77,43 @@ def categorize_by_phone(phone: str) -> str:
     return "Лейка"
 
 
+def get_period_label(df):
+    """Определяет период анализа из данных и возвращает строку для отображения."""
+    if df.empty or "date" not in df.columns:
+        return None
+    
+    dates = df["date"].dropna()
+    if dates.empty:
+        return None
+    
+    # Преобразуем date в datetime для работы с периодами
+    dates_dt = pd.to_datetime(dates)
+    
+    # Определяем основной месяц (самый частый месяц в данных)
+    months = dates_dt.dt.to_period("M")
+    main_month = months.mode()
+    
+    if len(main_month) > 0:
+        month_period = main_month[0]
+        # Форматируем: "ноябрь 2024"
+        month_names = {
+            1: "январь", 2: "февраль", 3: "март", 4: "апрель",
+            5: "май", 6: "июнь", 7: "июль", 8: "август",
+            9: "сентябрь", 10: "октябрь", 11: "ноябрь", 12: "декабрь"
+        }
+        month_name = month_names[month_period.month]
+        year = month_period.year
+        return f"{month_name} {year}"
+    
+    # Если не удалось определить основной месяц, показываем диапазон
+    min_date = dates.min()
+    max_date = dates.max()
+    if min_date == max_date:
+        return min_date.strftime("%d.%m.%Y")
+    else:
+        return f"{min_date.strftime('%d.%m.%Y')} - {max_date.strftime('%d.%m.%Y')}"
+
+
 def compare_washes(df1, df2, name1, name2):
     """Сравнивает уникальные мойки между двумя датафреймами."""
     washes1 = set(df1["wash_key"].dropna().unique())
@@ -234,16 +271,27 @@ def main():
 
     filtered = filtered[mask]
 
-    st.caption(
-        f"Текущий файл: **{selected_label}**, записей после фильтров: **{len(filtered)}**"
-    )
+    # Определяем период анализа из данных
+    period_label = get_period_label(filtered)
+    
+    # Показываем период анализа на витрине
+    if period_label:
+        st.info(f"📅 **Период анализа:** {period_label.capitalize()} | Файл: {selected_label} | Записей: **{len(filtered)}**")
+    else:
+        st.caption(
+            f"Текущий файл: **{selected_label}**, записей после фильтров: **{len(filtered)}**"
+        )
 
     if filtered.empty:
         st.warning("По выбранным фильтрам нет данных.")
         st.stop()
 
     # --- KPI-блок ---
-    st.subheader("Общие показатели")
+    # Показываем период в заголовке KPI, если он определён
+    if period_label:
+        st.subheader(f"Общие показатели за {period_label}")
+    else:
+        st.subheader("Общие показатели")
 
     unique_clients = (
         filtered["Телефон"].astype(str).str.strip().nunique()
