@@ -557,9 +557,14 @@ def main():
             help=f"Количество уникальных клиентов"
         )
         
-        # Топ-10 клиентов по LTV
-        st.markdown("**Топ-10 клиентов по LTV:**")
-        top_10_ltv = ltv_data.head(10).copy()
+        # Топ-10 клиентов по LTV (исключаем Яндекс)
+        # Фильтруем клиентов Яндекса (телефон 133133133133)
+        ltv_data_filtered = ltv_data[
+            ltv_data["Телефон"].apply(normalize_phone) != YANDEX_PHONE
+        ].copy()
+        
+        st.markdown("**Топ-10 клиентов по LTV (без Яндекс):**")
+        top_10_ltv = ltv_data_filtered.head(10).copy()
         top_10_ltv_display = top_10_ltv.copy()
         top_10_ltv_display["LTV_formatted"] = top_10_ltv_display["LTV"].apply(lambda x: f"{x:,.2f}".replace(",", " "))
         top_10_ltv_display = top_10_ltv_display.rename(columns={
