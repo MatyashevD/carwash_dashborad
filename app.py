@@ -46,11 +46,18 @@ def load_data(file) -> pd.DataFrame:
     return df
 
 
+def normalize_phone(phone) -> str:
+    """Нормализует телефон: убирает все нецифровые символы."""
+    phone_str = str(phone).strip()
+    # Убираем все символы кроме цифр
+    phone_str = ''.join(filter(str.isdigit, phone_str))
+    return phone_str
+
+
 def categorize_by_phone(phone: str) -> str:
     """Категоризирует по телефону: Яндекс (133133133133) или Лейка (всё остальное)."""
-    # Нормализуем телефон: убираем пробелы, дефисы, скобки и т.д.
-    phone_str = str(phone).strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "").replace("+", "")
-    if phone_str == YANDEX_PHONE:
+    phone_normalized = normalize_phone(phone)
+    if phone_normalized == YANDEX_PHONE:
         return "Яндекс"
     return "Лейка"
 
@@ -83,6 +90,23 @@ def main():
     df = df.assign(
         partner_category=df["Телефон"].apply(categorize_by_phone)
     )
+    
+    # Отладочная информация (можно убрать после проверки)
+    with st.sidebar.expander("🔍 Отладка категоризации", expanded=False):
+        st.write(f"**Всего записей:** {len(df)}")
+        st.write(f"**Лейка:** {len(df[df['partner_category'] == 'Лейка'])}")
+        st.write(f"**Яндекс:** {len(df[df['partner_category'] == 'Яндекс'])}")
+        
+        # Показываем примеры нормализованных телефонов
+        sample_phones = df["Телефон"].head(10).apply(normalize_phone).unique()
+        st.write(f"**Примеры нормализованных телефонов (первые 10):**")
+        for phone in sample_phones[:10]:
+            st.write(f"- `{phone}`")
+        
+        # Проверяем, есть ли телефон 133133133133 в данных
+        all_phones_normalized = df["Телефон"].apply(normalize_phone)
+        yandex_count = (all_phones_normalized == YANDEX_PHONE).sum()
+        st.write(f"**Записей с телефоном {YANDEX_PHONE}:** {yandex_count}")
 
     st.sidebar.markdown("---")
     st.sidebar.header("Фильтры")
@@ -206,20 +230,28 @@ def main():
         f"**Сумма кешбека:** {cashback_sum:,.0f} ₽".replace(",", " ")
     )
 
+    # Выручка по категориям (используем "Поступило на бокс" как в графике)
     leyka_total = filtered.loc[
-        filtered["partner_category"] == "Лейка", "total"
+        filtered["partner_category"] == "Лейка", "Поступило на бокс"
     ].sum()
     yandex_total = filtered.loc[
-        filtered["partner_category"] == "Яндекс", "total"
+        filtered["partner_category"] == "Яндекс", "Поступило на бокс"
     ].sum()
+    
+    # Отладочная информация
+    leyka_count = len(filtered[filtered["partner_category"] == "Лейка"])
+    yandex_count = len(filtered[filtered["partner_category"] == "Яндекс"])
+    
     col_partner1, col_partner2 = st.columns(2)
     col_partner1.metric(
         "Выручка Лейка (₽)",
         f"{leyka_total:,.0f}".replace(",", " "),
+        help=f"Записей: {leyka_count}"
     )
     col_partner2.metric(
         "Выручка Яндекс (₽)",
         f"{yandex_total:,.0f}".replace(",", " "),
+        help=f"Записей: {yandex_count}"
     )
 
     # --- Динамика по дням ---
