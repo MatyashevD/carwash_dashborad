@@ -177,6 +177,44 @@ def group_transactions_to_visits(df, time_window_minutes=30):
     return visits
 
 
+def calculate_ltv(df):
+    """
+    Рассчитывает LTV (Lifetime Value) для каждого клиента.
+    LTV = сумма всех транзакций клиента за период.
+    
+    Returns:
+        DataFrame с колонками: Телефон, LTV, количество_визитов, количество_транзакций
+    """
+    if df.empty or "Телефон" not in df.columns or "total" not in df.columns:
+        return pd.DataFrame(columns=["Телефон", "LTV", "количество_визитов", "количество_транзакций"])
+    
+    # Группируем транзакции в визиты
+    visits = group_transactions_to_visits(df, time_window_minutes=30)
+    
+    # Рассчитываем LTV по клиентам (сумма всех визитов клиента)
+    ltv_by_client = (
+        visits.groupby("Телефон")
+        .agg({
+            "visit_total": "sum",  # LTV = сумма всех визитов
+            "visit_id": "count"    # количество визитов
+        })
+        .reset_index()
+        .rename(columns={"visit_total": "LTV", "visit_id": "количество_визитов"})
+    )
+    
+    # Добавляем количество транзакций для каждого клиента
+    transaction_count = (
+        df.groupby("Телефон")
+        .size()
+        .reset_index(name="количество_транзакций")
+    )
+    
+    ltv_by_client = ltv_by_client.merge(transaction_count, on="Телефон", how="left")
+    ltv_by_client = ltv_by_client.sort_values("LTV", ascending=False)
+    
+    return ltv_by_client
+
+
 def compare_washes(df1, df2, name1, name2):
     """Сравнивает уникальные мойки между двумя датафреймами."""
     washes1 = set(df1["wash_key"].dropna().unique())
@@ -489,6 +527,54 @@ def main():
                 st.write("**Примеры партнёров в данных (первые 10):**")
                 for partner in unique_partners[:10]:
                     st.write(f"- `{partner}`")
+
+    # --- LTV (Lifetime Value) клиентов ---
+    st.markdown("---")
+    st.subheader("💰 LTV клиентов (Lifetime Value)")
+    
+    # Рассчитываем LTV для всех клиентов
+    ltv_data = calculate_ltv(filtered)
+    
+    if len(ltv_data) > 0:
+        avg_ltv = ltv_data["LTV"].mean()
+        median_ltv = ltv_data["LTV"].median()
+        total_clients_with_ltv = len(ltv_data)
+        
+        col_ltv1, col_ltv2, col_ltv3 = st.columns(3)
+        col_ltv1.metric(
+            "Средний LTV (₽)",
+            f"{avg_ltv:,.2f}".replace(",", " "),
+            help=f"Среднее значение LTV всех клиентов"
+        )
+        col_ltv2.metric(
+            "Медианный LTV (₽)",
+            f"{median_ltv:,.2f}".replace(",", " "),
+            help=f"Медианное значение LTV всех клиентов"
+        )
+        col_ltv3.metric(
+            "Клиентов с транзакциями",
+            f"{total_clients_with_ltv:,}".replace(",", " "),
+            help=f"Количество уникальных клиентов"
+        )
+        
+        # Топ-10 клиентов по LTV
+        st.markdown("**Топ-10 клиентов по LTV:**")
+        top_10_ltv = ltv_data.head(10).copy()
+        top_10_ltv_display = top_10_ltv.copy()
+        top_10_ltv_display["LTV_formatted"] = top_10_ltv_display["LTV"].apply(lambda x: f"{x:,.2f}".replace(",", " "))
+        top_10_ltv_display = top_10_ltv_display.rename(columns={
+            "Телефон": "Телефон",
+            "LTV_formatted": "LTV (₽)",
+            "количество_визитов": "Визитов",
+            "количество_транзакций": "Транзакций"
+        })
+        st.dataframe(
+            top_10_ltv_display[["Телефон", "LTV (₽)", "Визитов", "Транзакций"]],
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.info("Недостаточно данных для расчета LTV.")
 
     # --- Сравнение файлов (показываем сразу после KPI) ---
     if 'comparison' in st.session_state and 'compare_names' in st.session_state:
