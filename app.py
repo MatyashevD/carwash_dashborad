@@ -118,40 +118,43 @@ def main():
     selected_label = st.sidebar.selectbox("Выберите файл", file_labels)
     selected_file = next(f for f in uploaded_files if f.name == selected_label)
 
-    # Сравнение файлов (если загружено больше одного)
+    # Автоматическое сравнение файлов (если загружено больше одного)
     if len(uploaded_files) > 1:
         st.sidebar.markdown("---")
         st.sidebar.subheader("🔍 Сравнение файлов")
         
         compare_file1 = st.sidebar.selectbox(
-            "Первый файл для сравнения",
+            "Первый файл (базовый период)",
             file_labels,
             index=0,
             key="compare_file1"
         )
         compare_file2 = st.sidebar.selectbox(
-            "Второй файл для сравнения",
+            "Второй файл (сравниваемый период)",
             file_labels,
             index=min(1, len(file_labels) - 1),
             key="compare_file2"
         )
         
+        # Автоматическое сравнение при загрузке файлов
         if compare_file1 != compare_file2:
-            if st.sidebar.button("Сравнить мойки"):
-                df1_compare = load_data(next(f for f in uploaded_files if f.name == compare_file1))
-                df2_compare = load_data(next(f for f in uploaded_files if f.name == compare_file2))
-                
-                comparison = compare_washes(df1_compare, df2_compare, compare_file1, compare_file2)
-                
-                st.sidebar.write(f"**{compare_file1}:** {comparison['count_1']} моек")
-                st.sidebar.write(f"**{compare_file2}:** {comparison['count_2']} моек")
-                st.sidebar.write(f"**Общих моек:** {comparison['count_common']}")
-                st.sidebar.write(f"**Только в {compare_file1}:** {len(comparison['only_in_1'])}")
-                st.sidebar.write(f"**Только в {compare_file2}:** {len(comparison['only_in_2'])}")
-                
-                # Сохраняем результат сравнения в session state для отображения
-                st.session_state['comparison'] = comparison
-                st.session_state['compare_names'] = (compare_file1, compare_file2)
+            df1_compare = load_data(next(f for f in uploaded_files if f.name == compare_file1))
+            df2_compare = load_data(next(f for f in uploaded_files if f.name == compare_file2))
+            
+            comparison = compare_washes(df1_compare, df2_compare, compare_file1, compare_file2)
+            
+            st.sidebar.write(f"**{compare_file1}:** {comparison['count_1']} моек")
+            st.sidebar.write(f"**{compare_file2}:** {comparison['count_2']} моек")
+            st.sidebar.write(f"**Общих моек:** {comparison['count_common']}")
+            
+            if len(comparison['only_in_1']) > 0:
+                st.sidebar.warning(f"⚠️ **Исчезло моек:** {len(comparison['only_in_1'])}")
+            if len(comparison['only_in_2']) > 0:
+                st.sidebar.info(f"ℹ️ **Появилось моек:** {len(comparison['only_in_2'])}")
+            
+            # Сохраняем результат сравнения в session state для отображения
+            st.session_state['comparison'] = comparison
+            st.session_state['compare_names'] = (compare_file1, compare_file2)
 
     df = load_data(selected_file)
     
@@ -323,28 +326,38 @@ def main():
         help=f"Записей: {yandex_count}"
     )
 
-    # --- Сравнение файлов ---
+    # --- Сравнение файлов (показываем сразу после KPI) ---
     if 'comparison' in st.session_state and 'compare_names' in st.session_state:
-        st.markdown("---")
-        st.subheader("🔍 Сравнение моек между файлами")
-        
         comparison = st.session_state['comparison']
         name1, name2 = st.session_state['compare_names']
         
-        col_comp1, col_comp2, col_comp3 = st.columns(3)
-        col_comp1.metric(f"Моек в {name1}", comparison['count_1'])
-        col_comp2.metric(f"Моек в {name2}", comparison['count_2'])
-        col_comp3.metric("Общих моек", comparison['count_common'])
-        
+        # Показываем исчезнувшие мойки сразу, если они есть
         if comparison['only_in_1']:
-            with st.expander(f"❌ Мойки только в {name1} ({len(comparison['only_in_1'])})", expanded=True):
-                for wash in comparison['only_in_1']:
-                    st.write(f"- {wash}")
+            st.markdown("---")
+            st.error(f"⚠️ **ВНИМАНИЕ: {len(comparison['only_in_1'])} мойка(и) не работают в {name2} по сравнению с {name1}**")
+            
+            st.subheader(f"❌ Мойки, которые исчезли в {name2}:")
+            
+            # Показываем в виде таблицы для лучшей читаемости
+            missing_washes_df = pd.DataFrame({
+                "Партнёр | Автомойка | Адрес": comparison['only_in_1']
+            })
+            st.dataframe(missing_washes_df, use_container_width=True, hide_index=True)
+            
+            # Дополнительная статистика
+            col_comp1, col_comp2, col_comp3 = st.columns(3)
+            col_comp1.metric(f"Моек в {name1}", comparison['count_1'])
+            col_comp2.metric(f"Моек в {name2}", comparison['count_2'])
+            col_comp3.metric("Общих моек", comparison['count_common'])
         
+        # Показываем появившиеся мойки (менее критично)
         if comparison['only_in_2']:
-            with st.expander(f"✅ Мойки только в {name2} ({len(comparison['only_in_2'])})", expanded=True):
-                for wash in comparison['only_in_2']:
-                    st.write(f"- {wash}")
+            st.markdown("---")
+            st.info(f"ℹ️ **Новые мойки в {name2} ({len(comparison['only_in_2'])}):**")
+            new_washes_df = pd.DataFrame({
+                "Партнёр | Автомойка | Адрес": comparison['only_in_2']
+            })
+            st.dataframe(new_washes_df, use_container_width=True, hide_index=True)
 
     # --- Динамика по дням ---
     st.markdown("---")
