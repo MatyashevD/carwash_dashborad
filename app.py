@@ -331,9 +331,14 @@ def main():
     subscription_mask = filtered["Партнёр"].astype(str).str.strip().str.lower().str.contains("franchisinggroup", case=False, na=False)
     subscription_data = filtered[subscription_mask]
     
-    subscription_total = subscription_data["Поступило на бокс"].sum()
+    # Используем "Оплачено деньгами" для суммы подписок
+    subscription_total = subscription_data["Оплачено деньгами"].sum()
     subscription_unique_clients = subscription_data["Телефон"].astype(str).str.strip().nunique()
     subscription_count = len(subscription_data)
+    
+    # Отладочная информация
+    unique_partners = filtered["Партнёр"].astype(str).str.strip().unique()
+    franchising_partners = [p for p in unique_partners if "franchisinggroup" in str(p).lower()]
     
     st.markdown("---")
     st.subheader("📋 Подписки (FranchisingGroup)")
@@ -348,6 +353,19 @@ def main():
         f"{subscription_unique_clients:,}".replace(",", " "),
         help=f"Количество уникальных телефонов"
     )
+    
+    # Показываем отладочную информацию, если сумма = 0
+    if subscription_total == 0 and subscription_count == 0:
+        with st.expander("🔍 Отладка: почему подписки = 0?", expanded=False):
+            st.write(f"**Найдено записей с FranchisingGroup:** {subscription_count}")
+            st.write(f"**Уникальные партнёры в данных:** {len(unique_partners)}")
+            if franchising_partners:
+                st.write(f"**Партнёры, содержащие 'franchisinggroup':** {franchising_partners}")
+            else:
+                st.write("**Партнёры, содержащие 'franchisinggroup':** не найдено")
+                st.write("**Примеры партнёров в данных (первые 10):**")
+                for partner in unique_partners[:10]:
+                    st.write(f"- `{partner}`")
 
     # --- Сравнение файлов (показываем сразу после KPI) ---
     if 'comparison' in st.session_state and 'compare_names' in st.session_state:
