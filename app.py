@@ -326,6 +326,29 @@ def main():
         help=f"Записей: {yandex_count}"
     )
 
+    # --- Подписки (FranchisingGroup) ---
+    # Фильтруем записи с партнёром FranchisingGroup (учитываем возможные варианты написания)
+    subscription_mask = filtered["Партнёр"].astype(str).str.strip().str.lower().str.contains("franchisinggroup", case=False, na=False)
+    subscription_data = filtered[subscription_mask]
+    
+    subscription_total = subscription_data["Поступило на бокс"].sum()
+    subscription_unique_clients = subscription_data["Телефон"].astype(str).str.strip().nunique()
+    subscription_count = len(subscription_data)
+    
+    st.markdown("---")
+    st.subheader("📋 Подписки (FranchisingGroup)")
+    col_sub1, col_sub2 = st.columns(2)
+    col_sub1.metric(
+        "Сумма оплаченных подписок (₽)",
+        f"{subscription_total:,.0f}".replace(",", " "),
+        help=f"Записей: {subscription_count}"
+    )
+    col_sub2.metric(
+        "Уникальных клиентов с подпиской",
+        f"{subscription_unique_clients:,}".replace(",", " "),
+        help=f"Количество уникальных телефонов"
+    )
+
     # --- Сравнение файлов (показываем сразу после KPI) ---
     if 'comparison' in st.session_state and 'compare_names' in st.session_state:
         comparison = st.session_state['comparison']
