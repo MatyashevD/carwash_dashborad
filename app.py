@@ -409,8 +409,12 @@ def main():
     total_sum = filtered["total"].sum()
     cashback_sum = filtered["Начислено кешбека"].sum()
 
+    # ВАЖНО: Средний чек ВСЕГДА считаем БЕЗ Яндекса, так как для Яндекса все транзакции
+    # идут с одним телефоном (133133133133), и визиты считаются неправильно (все как один клиент)
+    filtered_for_avg_check = filtered[filtered["partner_category"] != "Яндекс"]
+    
     # Группируем транзакции в визиты (транзакции одного клиента в пределах 30 минут = один визит)
-    visits = group_transactions_to_visits(filtered, time_window_minutes=30)
+    visits = group_transactions_to_visits(filtered_for_avg_check, time_window_minutes=30)
     
     # Средний чек считаем по визитам, а не по отдельным транзакциям
     avg_check = visits["visit_total"].mean() if len(visits) > 0 else 0.0
@@ -436,11 +440,11 @@ def main():
     )
     # Показываем средний чек по визитам с информацией о количестве визитов
     num_visits = len(visits)
-    num_transactions = len(filtered)
+    num_transactions = len(filtered_for_avg_check)
     col4.metric(
         "Средний чек (₽)",
         f"{avg_check:,.2f}".replace(",", " "),
-        help=f"По визитам (визитов: {num_visits:,}, транзакций: {num_transactions:,})"
+        help=f"По визитам БЕЗ Яндекса (визитов: {num_visits:,}, транзакций: {num_transactions:,})"
     )
 
     col5, col6, col7, col8 = st.columns(4)
