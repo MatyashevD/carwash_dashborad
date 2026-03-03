@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 
 YANDEX_PHONE = "133133133133"
+TBANK_PHONE = "71119999991"  # Партнёр Т-Банк, клиент "Т Банк"
 
 
 @st.cache_data
@@ -70,10 +71,12 @@ def normalize_phone(phone) -> str:
 
 
 def categorize_by_phone(phone: str) -> str:
-    """Категоризирует по телефону: Яндекс (133133133133) или Лейка (всё остальное)."""
+    """Категоризирует по телефону: Яндекс, Т-Банк или Лейка (всё остальное)."""
     phone_normalized = normalize_phone(phone)
     if phone_normalized == YANDEX_PHONE:
         return "Яндекс"
+    if phone_normalized == TBANK_PHONE:
+        return "Т-Банк"
     return "Лейка"
 
 
@@ -306,6 +309,7 @@ def main():
         st.write(f"**Всего записей:** {len(df)}")
         st.write(f"**Лейка:** {len(df[df['partner_category'] == 'Лейка'])}")
         st.write(f"**Яндекс:** {len(df[df['partner_category'] == 'Яндекс'])}")
+        st.write(f"**Т-Банк:** {len(df[df['partner_category'] == 'Т-Банк'])}")
         
         # Показываем примеры нормализованных телефонов
         sample_phones = df["Телефон"].head(10).apply(normalize_phone).unique()
@@ -313,10 +317,12 @@ def main():
         for phone in sample_phones[:10]:
             st.write(f"- `{phone}`")
         
-        # Проверяем, есть ли телефон 133133133133 в данных
+        # Проверяем, есть ли телефоны партнёров в данных
         all_phones_normalized = df["Телефон"].apply(normalize_phone)
         yandex_count = (all_phones_normalized == YANDEX_PHONE).sum()
-        st.write(f"**Записей с телефоном {YANDEX_PHONE}:** {yandex_count}")
+        tbank_count = (all_phones_normalized == TBANK_PHONE).sum()
+        st.write(f"**Записей с телефоном {YANDEX_PHONE} (Яндекс):** {yandex_count}")
+        st.write(f"**Записей с телефоном {TBANK_PHONE} (Т-Банк):** {tbank_count}")
 
     st.sidebar.markdown("---")
     st.sidebar.header("Фильтры")
@@ -335,14 +341,19 @@ def main():
     else:
         start_date = end_date = date_range
 
-    # Исключить Яндекс
+    # Исключить Яндекс / Т-Банк
     exclude_yandex = st.sidebar.checkbox(
         "Исключить Яндекс (133133133133)", value=False
+    )
+    exclude_tbank = st.sidebar.checkbox(
+        "Исключить Т-Банк (71119999991)", value=False
     )
 
     filtered = df.copy()
     if exclude_yandex:
         filtered = filtered[filtered["partner_category"] != "Яндекс"]
+    if exclude_tbank:
+        filtered = filtered[filtered["partner_category"] != "Т-Банк"]
 
     # Фильтры по партнёру / автомойке / адресу
     partners = sorted(
@@ -409,9 +420,11 @@ def main():
     total_sum = filtered["total"].sum()
     cashback_sum = filtered["Начислено кешбека"].sum()
 
-    # ВАЖНО: Средний чек ВСЕГДА считаем БЕЗ Яндекса, так как для Яндекса все транзакции
-    # идут с одним телефоном (133133133133), и визиты считаются неправильно (все как один клиент)
-    filtered_for_avg_check = filtered[filtered["partner_category"] != "Яндекс"]
+    # ВАЖНО: Средний чек ВСЕГДА считаем БЕЗ Яндекса и Т-Банка, так как для партнёров
+    # все транзакции идут с одним телефоном, и визиты считаются неправильно
+    filtered_for_avg_check = filtered[
+        ~filtered["partner_category"].isin(["Яндекс", "Т-Банк"])
+    ]
     
     # Группируем транзакции в визиты (транзакции одного клиента в пределах 30 минут = один визит)
     visits = group_transactions_to_visits(filtered_for_avg_check, time_window_minutes=30)
@@ -444,7 +457,7 @@ def main():
     col4.metric(
         "Средний чек (₽)",
         f"{avg_check:,.2f}".replace(",", " "),
-        help=f"По визитам БЕЗ Яндекса (визитов: {num_visits:,}, транзакций: {num_transactions:,})"
+        help=f"По визитам БЕЗ Яндекс и Т-Банк (визитов: {num_visits:,}, транзакций: {num_transactions:,})"
     )
 
     col5, col6, col7, col8 = st.columns(4)
@@ -474,12 +487,16 @@ def main():
     yandex_total = filtered.loc[
         filtered["partner_category"] == "Яндекс", "Поступило на бокс"
     ].sum()
+    tbank_total = filtered.loc[
+        filtered["partner_category"] == "Т-Банк", "Поступило на бокс"
+    ].sum()
     
     # Отладочная информация
     leyka_count = len(filtered[filtered["partner_category"] == "Лейка"])
     yandex_count = len(filtered[filtered["partner_category"] == "Яндекс"])
+    tbank_count = len(filtered[filtered["partner_category"] == "Т-Банк"])
     
-    col_partner1, col_partner2 = st.columns(2)
+    col_partner1, col_partner2, col_partner3 = st.columns(3)
     col_partner1.metric(
         "Выручка Лейка (₽)",
         f"{leyka_total:,.0f}".replace(",", " "),
@@ -489,6 +506,11 @@ def main():
         "Выручка Яндекс (₽)",
         f"{yandex_total:,.0f}".replace(",", " "),
         help=f"Записей: {yandex_count}"
+    )
+    col_partner3.metric(
+        "Выручка Т-Банк (₽)",
+        f"{tbank_total:,.0f}".replace(",", " "),
+        help=f"Записей: {tbank_count}"
     )
 
     # --- Подписки (FranchisingGroup) ---
@@ -561,10 +583,11 @@ def main():
             help=f"Количество уникальных клиентов"
         )
         
-        # Топ-10 клиентов по LTV (исключаем Яндекс и клиентов только с бонусами)
-        # Фильтруем клиентов Яндекса (телефон 133133133133)
+        # Топ-10 клиентов по LTV (исключаем Яндекс, Т-Банк и клиентов только с бонусами)
+        # Фильтруем партнёрские телефоны (Яндекс, Т-Банк)
+        partner_phones = {YANDEX_PHONE, TBANK_PHONE}
         ltv_data_filtered = ltv_data[
-            ltv_data["Телефон"].apply(normalize_phone) != YANDEX_PHONE
+            ~ltv_data["Телефон"].apply(normalize_phone).isin(partner_phones)
         ].copy()
         
         # Исключаем клиентов, которые оплачивают только бонусами (владельцы/операторы)
@@ -583,7 +606,7 @@ def main():
             ltv_data_filtered["Телефон"].isin(clients_with_cash)
         ].copy()
         
-        st.markdown("**Топ-10 клиентов по LTV (без Яндекс и только бонусных):**")
+        st.markdown("**Топ-10 клиентов по LTV (без Яндекс, Т-Банк и только бонусных):**")
         top_10_ltv = ltv_data_filtered.head(10).copy()
         top_10_ltv_display = top_10_ltv.copy()
         top_10_ltv_display["LTV_formatted"] = top_10_ltv_display["LTV"].apply(lambda x: f"{x:,.2f}".replace(",", " "))
@@ -660,17 +683,17 @@ def main():
     col_d2.caption("Выручка по дням (Поступило на бокс)")
 
     st.markdown("---")
-    st.subheader("Динамика выручки Лейка vs Яндекс")
+    st.subheader("Динамика выручки Лейка vs Яндекс vs Т-Банк")
 
     partner_daily = (
-        filtered[filtered["partner_category"].isin(["Лейка", "Яндекс"])]
+        filtered[filtered["partner_category"].isin(["Лейка", "Яндекс", "Т-Банк"])]
         .groupby(["date", "partner_category"])
         .agg(revenue=("Поступило на бокс", "sum"))
         .reset_index()
     )
 
     if partner_daily.empty:
-        st.info("Нет данных по выбранным фильтрам для партнёров Лейка и Яндекс.")
+        st.info("Нет данных по выбранным фильтрам для партнёров Лейка, Яндекс и Т-Банк.")
     else:
         partner_pivot = (
             partner_daily.pivot(
@@ -681,7 +704,7 @@ def main():
         )
         st.line_chart(partner_pivot, use_container_width=True)
         st.caption(
-            "Сравнение суммарной выручки (Поступило на бокс) по дням для партнёров Лейка и Яндекс."
+            "Сравнение суммарной выручки (Поступило на бокс) по дням для партнёров Лейка, Яндекс и Т-Банк."
         )
 
     # --- Топ мойки ---
