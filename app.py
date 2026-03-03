@@ -683,7 +683,7 @@ def main():
     col_d2.caption("Выручка по дням (Поступило на бокс)")
 
     st.markdown("---")
-    st.subheader("Динамика выручки Лейка vs Яндекс vs Т-Банк")
+    st.subheader("Динамика выручки по партнёрам")
 
     partner_daily = (
         filtered[filtered["partner_category"].isin(["Лейка", "Яндекс", "Т-Банк"])]
@@ -695,17 +695,33 @@ def main():
     if partner_daily.empty:
         st.info("Нет данных по выбранным фильтрам для партнёров Лейка, Яндекс и Т-Банк.")
     else:
-        partner_pivot = (
-            partner_daily.pivot(
-                index="date", columns="partner_category", values="revenue"
+        # График 1: Лейка vs Яндекс (сопоставимые масштабы ~сотни тыс ₽)
+        leyka_yandex_daily = partner_daily[
+            partner_daily["partner_category"].isin(["Лейка", "Яндекс"])
+        ]
+        if not leyka_yandex_daily.empty:
+            lya_pivot = (
+                leyka_yandex_daily.pivot(
+                    index="date", columns="partner_category", values="revenue"
+                )
+                .fillna(0)
+                .sort_index()
             )
-            .fillna(0)
-            .sort_index()
-        )
-        st.line_chart(partner_pivot, use_container_width=True)
-        st.caption(
-            "Сравнение суммарной выручки (Поступило на бокс) по дням для партнёров Лейка, Яндекс и Т-Банк."
-        )
+            st.line_chart(lya_pivot, use_container_width=True)
+            st.caption("Лейка и Яндекс — выручка по дням (Поступило на бокс)")
+
+        # График 2: Т-Банк отдельно (масштаб в тысячах ₽, иначе линия сливается с осью)
+        tbank_daily = partner_daily[partner_daily["partner_category"] == "Т-Банк"]
+        if not tbank_daily.empty:
+            all_dates = sorted(filtered["date"].dropna().unique())
+            tbank_by_date = (
+                tbank_daily.groupby("date")["revenue"]
+                .sum()
+                .reindex(all_dates)
+                .fillna(0)
+            )
+            st.line_chart(tbank_by_date, use_container_width=True)
+            st.caption("Т-Банк — выручка по дням (отдельный график из-за меньшего масштаба)")
 
     # --- Топ мойки ---
     st.markdown("---")
