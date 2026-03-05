@@ -739,13 +739,20 @@ def main():
         city_users["lon"] = city_users["city"].map(lambda c: CITY_COORDS.get(c, (None, None))[1])
         city_with_coords = city_users.dropna(subset=["lat", "lon"])
 
-        # Таблица топ-15 городов
-        st.markdown("**Топ-15 городов по уникальным пользователям:**")
-        top_cities = city_users.head(15).copy()
-        top_cities_display = top_cities[["city", "users"]].rename(
+        # Таблица топ-15 городов + скачивание полного списка
+        all_cities_display = city_users[["city", "users"]].rename(
             columns={"city": "Город", "users": "Уникальных пользователей"}
         )
-        st.dataframe(top_cities_display, use_container_width=True, hide_index=True)
+        st.markdown("**Топ-15 городов по уникальным пользователям:**")
+        st.dataframe(all_cities_display.head(15), use_container_width=True, hide_index=True)
+
+        csv_all_cities = all_cities_display.to_csv(index=False, sep=";", encoding="utf-8-sig")
+        st.download_button(
+            label=f"📥 Скачать все города ({len(all_cities_display)})",
+            data=csv_all_cities,
+            file_name="active_users_by_city.csv",
+            mime="text/csv",
+        )
 
         # Карта
         if not city_with_coords.empty:
