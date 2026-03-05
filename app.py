@@ -650,6 +650,38 @@ def main():
         help=f"Записей: {tbank_count}"
     )
 
+    # --- Операции по партнёрам (база для сервисного сбора) ---
+    # Только «Мойка автомобиля» — исключаем подписки (покупка/продление кешбэка)
+    is_wash = filtered["Тип оплаты"].astype(str).str.strip() == "Мойка автомобиля"
+
+    ops_leyka = int((is_wash & (filtered["partner_category"] == "Лейка")).sum())
+    ops_yandex = int((is_wash & (filtered["partner_category"] == "Яндекс")).sum())
+    ops_tbank = int((is_wash & (filtered["partner_category"] == "Т-Банк")).sum())
+    ops_subscriptions = int((~is_wash).sum())
+
+    col_ops1, col_ops2, col_ops3 = st.columns(3)
+    col_ops1.metric(
+        "Операций Лейка",
+        f"{ops_leyka:,}".replace(",", " "),
+        help=(
+            f"Только оплаты за мойку (без подписок). "
+            f"Визитов: {num_visits:,} | Ср. транзакций за визит: {ops_leyka / num_visits:.1f}"
+            if num_visits > 0 else "Нет визитов"
+        ),
+    )
+    col_ops2.metric(
+        "Операций Яндекс",
+        f"{ops_yandex:,}".replace(",", " "),
+    )
+    col_ops3.metric(
+        "Операций Т-Банк",
+        f"{ops_tbank:,}".replace(",", " "),
+    )
+    if ops_subscriptions > 0:
+        st.caption(
+            f"Не учтено подписок (покупка/продление кешбэка): **{ops_subscriptions:,}**".replace(",", " ")
+        )
+
     # --- DAU / WAU / MAU (только Лейка) ---
     st.markdown("---")
     st.subheader("📊 DAU / WAU / MAU (пользователи Лейки)")
