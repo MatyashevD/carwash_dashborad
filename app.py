@@ -355,6 +355,28 @@ def calculate_ltv(df):
     return ltv_by_client
 
 
+def find_bonus_only_phones(df):
+    """
+    Находит телефоны, которые за весь период оплачивали ТОЛЬКО бонусами
+    (сумма «Оплачено деньгами» = 0). Это операторы, владельцы моек или
+    разовые реферальные пользователи, искажающие статистику.
+    """
+    if df.empty or "Телефон" not in df.columns:
+        return set()
+
+    wash_only = df[df["Тип оплаты"].astype(str).str.strip() == "Мойка автомобиля"]
+    if wash_only.empty:
+        return set()
+
+    phone_money = (
+        wash_only.groupby("Телефон")["Оплачено деньгами"]
+        .sum()
+        .reset_index()
+    )
+    bonus_only = phone_money[phone_money["Оплачено деньгами"] == 0]["Телефон"]
+    return set(bonus_only.tolist())
+
+
 def compare_washes(df1, df2, name1, name2):
     """Сравнивает уникальные мойки между двумя датафреймами."""
     washes1 = set(df1["wash_key"].dropna().unique())
@@ -486,11 +508,25 @@ def main():
         "Исключить Т-Банк (71119999991)", value=False
     )
 
+    # Находим телефоны, платящие только бонусами (операторы / владельцы моек)
+    bonus_only_phones = find_bonus_only_phones(df)
+    exclude_bonus_only = st.sidebar.checkbox(
+        f"Исключить оплату только бонусами ({len(bonus_only_phones)} тел.)",
+        value=False,
+        help=(
+            "Исключает пользователей, у которых все транзакции оплачены "
+            "только бонусами (0₽ деньгами). Обычно это операторы, владельцы "
+            "моек или разовые реферальные пользователи."
+        ),
+    )
+
     filtered = df.copy()
     if exclude_yandex:
         filtered = filtered[filtered["partner_category"] != "Яндекс"]
     if exclude_tbank:
         filtered = filtered[filtered["partner_category"] != "Т-Банк"]
+    if exclude_bonus_only and bonus_only_phones:
+        filtered = filtered[~filtered["Телефон"].isin(bonus_only_phones)]
 
     # Фильтры по партнёру / автомойке / адресу
     partners = sorted(
@@ -529,6 +565,13 @@ def main():
     else:
         st.caption(
             f"Текущий файл: **{selected_label}**, записей после фильтров: **{len(filtered)}**"
+        )
+
+    if exclude_bonus_only and bonus_only_phones:
+        excluded_txs = len(df[df["Телефон"].isin(bonus_only_phones)])
+        st.warning(
+            f"🔒 **Фильтр активен:** исключено {len(bonus_only_phones)} телефонов "
+            f"({excluded_txs:,} транзакций), оплачивающих только бонусами".replace(",", " ")
         )
 
     if filtered.empty:
