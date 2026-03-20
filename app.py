@@ -143,13 +143,14 @@ CITY_COORDS = {
 }
 
 
+_CATEGORY_COLS = ["Партнёр", "Автомойка", "Адрес", "wash_key", "Город", "Тип оплаты"]
+
+
 @st.cache_data
 def load_data(file) -> pd.DataFrame:
     """Читает CSV в формате orderTable, приводит числа и даты."""
-    # Читаем CSV как строки, чтобы не потерять научную нотацию в телефонах
     df = pd.read_csv(file, sep=";", encoding="utf-8-sig", dtype=str)
 
-    # Приводим числовые колонки
     num_cols = [
         "Поступило на бокс",
         "Оплачено деньгами",
@@ -167,22 +168,50 @@ def load_data(file) -> pd.DataFrame:
             )
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
-    # Даты / время
     df["Дата оплаты"] = pd.to_datetime(df["Дата оплаты"], errors="coerce")
     df["date"] = df["Дата оплаты"].dt.date
     df["hour"] = df["Дата оплаты"].dt.hour
     df["weekday"] = df["Дата оплаты"].dt.weekday
+    df["month"] = df["Дата оплаты"].dt.to_period("M").astype(str)
 
-    # Итоговый чек
     df["total"] = df.get("Оплачено деньгами", 0) + df.get("Оплачено бонусами", 0)
 
-    # Ключ мойки (Партнёр | Автомойка | Адрес)
     df["Партнёр"] = df["Партнёр"].fillna("")
     df["Автомойка"] = df["Автомойка"].fillna("")
     df["Адрес"] = df["Адрес"].fillna("")
     df["wash_key"] = df["Партнёр"] + " | " + df["Автомойка"] + " | " + df["Адрес"]
 
+    for col in _CATEGORY_COLS:
+        if col in df.columns:
+            df[col] = df[col].astype("category")
+
     return df
+
+
+_DEDUP_COLS = ["Телефон", "Дата оплаты", "Автомойка", "Поступило на бокс"]
+
+
+@st.cache_data
+def merge_and_deduplicate(files) -> pd.DataFrame:
+    """Объединяет несколько CSV в один DataFrame с дедупликацией."""
+    frames = []
+    for f in files:
+        part = load_data(f)
+        part["_source_file"] = f.name
+        frames.append(part)
+    merged = pd.concat(frames, ignore_index=True)
+
+    before = len(merged)
+    existing = [c for c in _DEDUP_COLS if c in merged.columns]
+    if existing:
+        merged = merged.drop_duplicates(subset=existing, keep="first")
+    after = len(merged)
+    merged.attrs["dedup_removed"] = before - after
+
+    for col in _CATEGORY_COLS:
+        if col in merged.columns:
+            merged[col] = merged[col].astype("category")
+    return merged
 
 
 def normalize_phone(phone) -> str:
@@ -389,50 +418,78 @@ def main():
         st.info("Загрузите хотя бы один CSV-файл, чтобы увидеть дашборд.")
         st.stop()
 
-    # Выбор текущего файла для анализа
     file_labels = [f.name for f in uploaded_files]
-    selected_label = st.sidebar.selectbox("Выберите файл", file_labels)
-    selected_file = next(f for f in uploaded_files if f.name == selected_label)
 
-    # Автоматическое сравнение файлов (если загружено больше одного)
+    # Режим данных: один файл или объединение всех
     if len(uploaded_files) > 1:
+        data_mode = st.sidebar.radio(
+            "Режим данных",
+            ["Один файл", "Все файлы вместе"],
+            index=0,
+            key="data_mode",
+        )
+    else:
+        data_mode = "Один файл"
+
+    if data_mode == "Один файл":
+        selected_label = st.sidebar.selectbox("Выберите файл", file_labels)
+        selected_file = next(f for f in uploaded_files if f.name == selected_label)
+        df = load_data(selected_file)
+    else:
+        df = merge_and_deduplicate(uploaded_files)
+        dedup_removed = df.attrs.get("dedup_removed", 0)
+        selected_label = f"Объединено {len(uploaded_files)} файлов"
+        if dedup_removed > 0:
+            st.sidebar.success(f"Дедупликация: удалено {dedup_removed:,} дублей".replace(",", " "))
+
+    # Фильтр по месяцам (доступен всегда, полезен при объединении)
+    if "month" in df.columns:
+        available_months = sorted(df["month"].dropna().unique())
+        if len(available_months) > 1:
+            month_sel = st.sidebar.multiselect(
+                "Месяцы",
+                available_months,
+                default=available_months,
+                key="month_filter",
+            )
+            if month_sel and len(month_sel) < len(available_months):
+                df = df[df["month"].isin(month_sel)]
+
+    # Сравнение файлов (если загружено больше одного и режим «Один файл»)
+    if len(uploaded_files) > 1 and data_mode == "Один файл":
         st.sidebar.markdown("---")
         st.sidebar.subheader("🔍 Сравнение файлов")
-        
+
         compare_file1 = st.sidebar.selectbox(
             "Первый файл (базовый период)",
             file_labels,
             index=0,
-            key="compare_file1"
+            key="compare_file1",
         )
         compare_file2 = st.sidebar.selectbox(
             "Второй файл (сравниваемый период)",
             file_labels,
             index=min(1, len(file_labels) - 1),
-            key="compare_file2"
+            key="compare_file2",
         )
-        
-        # Автоматическое сравнение при загрузке файлов
+
         if compare_file1 != compare_file2:
             df1_compare = load_data(next(f for f in uploaded_files if f.name == compare_file1))
             df2_compare = load_data(next(f for f in uploaded_files if f.name == compare_file2))
-            
+
             comparison = compare_washes(df1_compare, df2_compare, compare_file1, compare_file2)
-            
+
             st.sidebar.write(f"**{compare_file1}:** {comparison['count_1']} моек")
             st.sidebar.write(f"**{compare_file2}:** {comparison['count_2']} моек")
             st.sidebar.write(f"**Общих моек:** {comparison['count_common']}")
-            
+
             if len(comparison['only_in_1']) > 0:
                 st.sidebar.warning(f"⚠️ **Исчезло моек:** {len(comparison['only_in_1'])}")
             if len(comparison['only_in_2']) > 0:
                 st.sidebar.info(f"ℹ️ **Появилось моек:** {len(comparison['only_in_2'])}")
-            
-            # Сохраняем результат сравнения в session state для отображения
+
             st.session_state['comparison'] = comparison
             st.session_state['compare_names'] = (compare_file1, compare_file2)
-
-    df = load_data(selected_file)
     
     # Применяем категоризацию к исходным данным ДО фильтрации
     df = df.assign(
