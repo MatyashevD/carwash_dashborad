@@ -149,6 +149,8 @@ _CATEGORY_COLS = ["Партнёр", "Автомойка", "Адрес", "wash_ke
 @st.cache_data
 def load_data(file) -> pd.DataFrame:
     """Читает CSV в формате orderTable, приводит числа и даты."""
+    if hasattr(file, "seek"):
+        file.seek(0)
     df = pd.read_csv(file, sep=";", encoding="utf-8-sig", dtype=str)
 
     num_cols = [
