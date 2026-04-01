@@ -631,9 +631,15 @@ def main():
     )
 
     total_cash = filtered["Оплачено деньгами"].sum()
-    total_bonus = filtered["Оплачено бонусами"].sum()
     total_sum = filtered["total"].sum()
     cashback_sum = filtered["Начислено кешбека"].sum()
+    
+    # Для бонусных метрик исключаем Яндекс и Т-Банк
+    filtered_for_bonus = filtered[
+        ~filtered["partner_category"].isin(["Яндекс", "Т-Банк"])
+    ]
+    total_bonus = filtered_for_bonus["Оплачено бонусами"].sum()
+    total_sum_for_bonus = filtered_for_bonus["total"].sum()
 
     # ВАЖНО: Средний чек ВСЕГДА считаем БЕЗ Яндекса и Т-Банка, так как для партнёров
     # все транзакции идут с одним телефоном, и визиты считаются неправильно
@@ -651,7 +657,11 @@ def main():
     # Для сравнения показываем также средний чек по транзакциям (старый способ)
     avg_check_by_transactions = filtered["total"].mean()
     
-    bonus_share = total_bonus / total_sum * 100 if total_sum > 0 else 0.0
+    bonus_share = (
+        total_bonus / total_sum_for_bonus * 100
+        if total_sum_for_bonus > 0
+        else 0.0
+    )
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric(
