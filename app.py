@@ -633,13 +633,16 @@ def main():
     total_cash = filtered["Оплачено деньгами"].sum()
     total_sum = filtered["total"].sum()
     cashback_sum = filtered["Начислено кешбека"].sum()
-    
-    # Для бонусных метрик исключаем Яндекс и Т-Банк
-    filtered_for_bonus = filtered[
-        ~filtered["partner_category"].isin(["Яндекс", "Т-Банк"])
-    ]
-    total_bonus = filtered_for_bonus["Оплачено бонусами"].sum()
-    total_sum_for_bonus = filtered_for_bonus["total"].sum()
+
+    # Для метрик лояльности считаем только Лейку и исключаем "служебные" bonus-only телефоны
+    filtered_for_loyalty = filtered[filtered["partner_category"] == "Лейка"].copy()
+    if bonus_only_phones:
+        filtered_for_loyalty = filtered_for_loyalty[
+            ~filtered_for_loyalty["Телефон"].isin(bonus_only_phones)
+        ]
+    loyalty_cash = filtered_for_loyalty["Оплачено деньгами"].sum()
+    loyalty_bonus = filtered_for_loyalty["Оплачено бонусами"].sum()
+    loyalty_total = filtered_for_loyalty["total"].sum()
 
     # ВАЖНО: Средний чек ВСЕГДА считаем БЕЗ Яндекса и Т-Банка, так как для партнёров
     # все транзакции идут с одним телефоном, и визиты считаются неправильно
@@ -657,11 +660,7 @@ def main():
     # Для сравнения показываем также средний чек по транзакциям (старый способ)
     avg_check_by_transactions = filtered["total"].mean()
     
-    bonus_share = (
-        total_bonus / total_sum_for_bonus * 100
-        if total_sum_for_bonus > 0
-        else 0.0
-    )
+    bonus_share = loyalty_bonus / loyalty_total * 100 if loyalty_total > 0 else 0.0
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric(
@@ -691,14 +690,34 @@ def main():
         f"{total_sum:,.0f}".replace(",", " "),
     )
     col6.metric(
-        "Оплачено деньгами (₽)",
+        "Оплачено деньгами (все каналы, ₽)",
         f"{total_cash:,.0f}".replace(",", " "),
     )
     col7.metric(
-        "Оплачено бонусами (₽)",
-        f"{total_bonus:,.0f}".replace(",", " "),
+        "Оплачено бонусами (Лейка, ₽)",
+        f"{loyalty_bonus:,.0f}".replace(",", " "),
+        help="Только Лейка, без Яндекс/Т-Банк и без телефонов с оплатой только бонусами."
     )
-    col8.metric("Доля бонусов (%)", f"{bonus_share:.2f}")
+    col8.metric(
+        "Доля бонусов (Лейка, %)",
+        f"{bonus_share:.2f}",
+        help="Формула: бонусы Лейка / (деньги Лейка + бонусы Лейка), после очистки bonus-only телефонов."
+    )
+
+    excluded_bonus_only_in_period = 0
+    if bonus_only_phones:
+        excluded_bonus_only_in_period = int(
+            (
+                (filtered["partner_category"] == "Лейка")
+                & (filtered["Телефон"].isin(bonus_only_phones))
+            ).sum()
+        )
+    st.caption(
+        "Лояльность считается только по Лейке: "
+        f"{len(filtered_for_loyalty):,} транзакций в базе KPI, "
+        f"исключено bonus-only транзакций: {excluded_bonus_only_in_period:,}."
+        .replace(",", " ")
+    )
 
     st.markdown(
         f"**Медианный чек:** {median_check:.2f} ₽ &nbsp;&nbsp;|&nbsp;&nbsp; "
