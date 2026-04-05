@@ -716,28 +716,25 @@ def main():
     # --- Сервисный сбор ---
     if "Оплачено сервисным сбором" in filtered.columns:
         fee_numeric = filtered["Оплачено сервисным сбором"]
-
+        fee_notna = fee_numeric.notna()
         fee_paid_mask = fee_numeric > 0
+        fee_declined_mask = fee_notna & (fee_numeric == 0)
+
+        txn_paid = fee_paid_mask.sum()
+        txn_declined = fee_declined_mask.sum()
+        txn_total = txn_paid + txn_declined
         fee_total = fee_numeric.fillna(0.0).sum()
 
-        fee_enabled_objects = (
-            filtered.loc[fee_paid_mask, ["Партнёр", "Адрес"]]
-            .drop_duplicates()
-        )
-
-        if fee_total > 0:
+        if txn_total > 0:
             st.markdown("---")
             st.subheader("🧾 Сервисный сбор")
 
-            washes_with_fee = fee_enabled_objects.shape[0]
-
-            on_enabled = filtered.merge(fee_enabled_objects, on=["Партнёр", "Адрес"], how="inner")
-            on_fee = on_enabled["Оплачено сервисным сбором"]
-            txn_paid = (on_fee > 0).sum()
-            txn_declined = (on_fee.notna() & (on_fee == 0)).sum()
-            txn_total = txn_paid + txn_declined
-            pct_paid = txn_paid / txn_total * 100 if txn_total > 0 else 0.0
-            pct_declined = txn_declined / txn_total * 100 if txn_total > 0 else 0.0
+            pct_paid = txn_paid / txn_total * 100
+            washes_with_fee = (
+                filtered.loc[fee_notna, ["Партнёр", "Адрес"]]
+                .drop_duplicates()
+                .shape[0]
+            )
 
             cf1, cf2, cf3 = st.columns(3)
             cf1.metric(
@@ -747,29 +744,27 @@ def main():
             cf2.metric(
                 "Мойки с сервисным сбором",
                 f"{washes_with_fee}",
-                help="Объекты с хотя бы одной оплатой сбора (Партнёр + Адрес)",
+                help="Объекты где поле сервисного сбора заполнено (Партнёр + Адрес)",
             )
             cf3.metric(
                 "Конверсия в оплату сбора",
                 f"{pct_paid:.1f}%",
-                help=f"По транзакциям на объектах с включённым сбором: "
-                     f"{txn_paid:,} оплатили / {txn_total:,} всего. "
-                     f"Отказались: {pct_declined:.1f}%",
+                help=f"{txn_paid:,} оплатили / {txn_total:,} всего (пустые исключены)",
             )
 
             cf4, cf5, cf6 = st.columns(3)
             cf4.metric(
-                "Транзакций с оплатой сбора",
+                "Транзакций с оплатой",
                 f"{txn_paid:,}".replace(",", " "),
             )
             cf5.metric(
-                "Транзакций с отказом от сбора",
+                "Транзакций с отказом",
                 f"{txn_declined:,}".replace(",", " "),
-                help="Клиент снял галочку сервисного сбора",
             )
             cf6.metric(
-                "Всего транзакций (объекты со сбором)",
+                "Всего транзакций (сбор включён)",
                 f"{txn_total:,}".replace(",", " "),
+                help="Транзакции где поле сервисного сбора не пустое",
             )
 
     # --- DAU / WAU / MAU (только Лейка) ---
