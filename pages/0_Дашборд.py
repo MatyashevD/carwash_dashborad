@@ -711,7 +711,7 @@ def main():
 
     # --- Сервисный сбор ---
     if "Оплачено сервисным сбором" in filtered.columns:
-        fee_col = filtered["Оплачено сервисным сбором"]
+        fee_col = pd.to_numeric(filtered["Оплачено сервисным сбором"], errors="coerce").fillna(0.0)
         fee_total = fee_col.sum()
         if fee_total > 0:
             st.markdown("---")
