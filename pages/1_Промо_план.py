@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import io
 import re
+import zipfile
 
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Промо-план", page_icon="📊", layout="wide")
 st.title("Генератор промо-плана")
-st.caption("Загрузите CSV-файлы Лейки (1–3 месяца), выберите партнёра и получите готовый Excel.")
+st.caption("Загрузите CSV или ZIP-архив с CSV (1–3 месяца), выберите партнёра и получите готовый Excel.")
 
 # ---------------------------------------------------------------------------
 # Транслитерация для суффикса промокодов
@@ -44,36 +45,67 @@ def _make_suffix(partner: str, city: str) -> str:
     return city_part + num_part
 
 
+def _extract_csv_buffers(uploaded_files) -> list[tuple[str, io.BytesIO]]:
+    """Из списка загруженных файлов (CSV / ZIP) вернуть список (имя, BytesIO)."""
+    result: list[tuple[str, io.BytesIO]] = []
+    for f in uploaded_files:
+        f.seek(0)
+        if f.name.lower().endswith(".zip"):
+            try:
+                with zipfile.ZipFile(io.BytesIO(f.read())) as zf:
+                    for name in zf.namelist():
+                        if name.lower().endswith(".csv") and not name.startswith("__"):
+                            result.append((name, io.BytesIO(zf.read(name))))
+            except zipfile.BadZipFile:
+                st.sidebar.warning(f"⚠ {f.name} — повреждённый ZIP, пропущен")
+        else:
+            result.append((f.name, io.BytesIO(f.read())))
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Сайдбар: загрузка
 # ---------------------------------------------------------------------------
 
 st.sidebar.header("1. Загрузка данных")
+st.sidebar.info(
+    "💡 **Рекомендация для Cloud:** запакуйте CSV в ZIP-архив — "
+    "файлы сжимаются в ~7 раз и загружаются за секунды."
+)
 uploaded = st.sidebar.file_uploader(
-    "CSV-файлы Лейки (orderTable)", type=["csv"], accept_multiple_files=True,
+    "CSV или ZIP с CSV (orderTable)",
+    type=["csv", "zip"],
+    accept_multiple_files=True,
 )
 
 if not uploaded:
-    st.info("Загрузите хотя бы один CSV-файл через боковую панель.")
+    st.info("Загрузите хотя бы один CSV или ZIP-файл через боковую панель.")
     st.stop()
 
-st.sidebar.success(f"Загружено файлов: {len(uploaded)}")
-for f in uploaded:
-    st.sidebar.caption(f"  ✓ {f.name} ({f.size / 1_048_576:.1f} МБ)")
+csv_files = _extract_csv_buffers(uploaded)
+
+if not csv_files:
+    st.error("Не найдено ни одного CSV-файла в загруженных данных.")
+    st.stop()
+
+st.sidebar.success(f"CSV-файлов: {len(csv_files)}")
+for name, buf in csv_files:
+    st.sidebar.caption(f"  ✓ {name} ({buf.getbuffer().nbytes / 1_048_576:.1f} МБ)")
 
 # ---------------------------------------------------------------------------
 # Извлечение партнёров — лёгкий проход только по нужным колонкам
 # ---------------------------------------------------------------------------
 
-if "partners_cache" not in st.session_state or st.session_state.get("_files_key") != [f.name for f in uploaded]:
+files_key = [name for name, _ in csv_files]
+if "partners_cache" not in st.session_state or st.session_state.get("_files_key") != files_key:
     partners: set[str] = set()
     addresses: list[str] = []
     washes: list[str] = []
-    for f in uploaded:
-        f.seek(0)
+    for _, buf in csv_files:
+        buf.seek(0)
         try:
             chunk = pd.read_csv(
-                f, sep=";", encoding="utf-8-sig", dtype=str, nrows=50_000,
+                buf, sep=";", encoding="utf-8-sig", dtype=str, nrows=50_000,
                 usecols=lambda c: c in ("Партнёр", "Адрес", "Автомойка"),
             )
         except Exception:
@@ -87,7 +119,7 @@ if "partners_cache" not in st.session_state or st.session_state.get("_files_key"
     st.session_state["partners_cache"] = sorted(partners)
     st.session_state["addresses_cache"] = addresses
     st.session_state["washes_cache"] = washes
-    st.session_state["_files_key"] = [f.name for f in uploaded]
+    st.session_state["_files_key"] = files_key
 
 partners_list = st.session_state["partners_cache"]
 addresses_list = st.session_state["addresses_cache"]
@@ -110,7 +142,7 @@ for a in addresses_list:
         first_addr = a.strip()
         break
 
-from city_coords import CITY_COORDS, find_city_coords  # лёгкий модуль
+from city_coords import CITY_COORDS, find_city_coords
 
 found = find_city_coords(first_addr)
 default_city = found[0] if found else (first_addr.split(",")[0].strip() if first_addr else "")
@@ -143,7 +175,7 @@ st.subheader("Превью")
 col1, col2, col3 = st.columns(3)
 col1.metric("Партнёр", selected_partner)
 col2.metric("Город", city or "—")
-col3.metric("Файлов загружено", len(uploaded))
+col3.metric("CSV-файлов", len(csv_files))
 
 st.markdown(f"**Суффикс промокодов:** `{promo_suffix}` · **Погода:** {'да' if include_weather and coords else 'нет'}")
 
@@ -166,7 +198,7 @@ if st.button("Сформировать промо-план", type="primary", use
         closest = min(labels.keys(), key=lambda k: abs(k - pct))
         progress.progress(v, text=labels[closest])
 
-    from promo_pipeline import PromoConfig, generate_promo_plan  # lazy import
+    from promo_pipeline import PromoConfig, generate_promo_plan
 
     config = PromoConfig(
         partner_display_name=selected_partner,
@@ -179,9 +211,9 @@ if st.button("Сформировать промо-план", type="primary", use
     )
 
     buffers = []
-    for f in uploaded:
-        f.seek(0)
-        buffers.append(io.BytesIO(f.read()))
+    for _, buf in csv_files:
+        buf.seek(0)
+        buffers.append(io.BytesIO(buf.read()))
 
     try:
         xlsx_buf = generate_promo_plan(config, buffers, progress_cb=_update_progress)

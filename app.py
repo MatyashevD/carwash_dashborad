@@ -1,3 +1,6 @@
+import io
+import zipfile
+
 import streamlit as st
 
 st.set_page_config(page_title="Carwash Dashboard", layout="wide")
@@ -6,6 +9,27 @@ import pandas as pd
 import numpy as np
 
 from city_coords import CITY_COORDS
+
+
+def extract_csv_from_uploads(uploaded_files) -> list:
+    """Принимает CSV и ZIP, возвращает список file-like объектов с CSV."""
+    result = []
+    for f in uploaded_files:
+        f.seek(0)
+        if f.name.lower().endswith(".zip"):
+            try:
+                raw = f.read()
+                with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                    for name in zf.namelist():
+                        if name.lower().endswith(".csv") and not name.startswith("__"):
+                            buf = io.BytesIO(zf.read(name))
+                            buf.name = name
+                            result.append(buf)
+            except zipfile.BadZipFile:
+                pass
+        else:
+            result.append(f)
+    return result
 
 YANDEX_PHONE = "133133133133"
 TBANK_PHONE = "71119999991"  # Партнёр Т-Банк, клиент "Т Банк"
@@ -276,15 +300,23 @@ def main():
 
     st.sidebar.header("Настройки данных")
 
-    # Загрузка одного или нескольких CSV
-    uploaded_files = st.sidebar.file_uploader(
-        "Загрузите один или несколько CSV-файлов `orderTable`",
-        type=["csv"],
+    uploaded_raw = st.sidebar.file_uploader(
+        "Загрузите CSV или ZIP с CSV (orderTable)",
+        type=["csv", "zip"],
         accept_multiple_files=True,
     )
+    st.sidebar.info(
+        "💡 **Совет:** запакуйте CSV в ZIP — файлы сжимаются в ~7 раз "
+        "и загружаются гораздо быстрее."
+    )
 
+    if not uploaded_raw:
+        st.info("Загрузите хотя бы один CSV или ZIP-файл, чтобы увидеть дашборд.")
+        st.stop()
+
+    uploaded_files = extract_csv_from_uploads(uploaded_raw)
     if not uploaded_files:
-        st.info("Загрузите хотя бы один CSV-файл, чтобы увидеть дашборд.")
+        st.error("Не найдено ни одного CSV-файла в загруженных данных.")
         st.stop()
 
     file_labels = [f.name for f in uploaded_files]
