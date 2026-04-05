@@ -61,7 +61,6 @@ if not uploaded:
     st.stop()
 
 
-@st.cache_data(show_spinner="Чтение CSV…")
 def _read_partners(files) -> tuple[list[str], list[str], list[str]]:
     """Быстрый проход по файлам: список партнёров, первые адрес + мойка."""
     partners: set[str] = set()
@@ -69,7 +68,10 @@ def _read_partners(files) -> tuple[list[str], list[str], list[str]]:
     washes: list[str] = []
     for f in files:
         f.seek(0)
-        df = pd.read_csv(f, sep=";", encoding="utf-8-sig", dtype=str, usecols=lambda c: c in ("Партнёр", "Адрес", "Автомойка"))
+        try:
+            df = pd.read_csv(f, sep=";", encoding="utf-8-sig", dtype=str)
+        except Exception:
+            continue
         if "Партнёр" in df.columns:
             partners.update(df["Партнёр"].dropna().unique())
         if "Адрес" in df.columns and not addresses:
@@ -79,7 +81,8 @@ def _read_partners(files) -> tuple[list[str], list[str], list[str]]:
     return sorted(partners), addresses, washes
 
 
-partners_list, addresses_list, washes_list = _read_partners(uploaded)
+with st.spinner("Чтение CSV…"):
+    partners_list, addresses_list, washes_list = _read_partners(uploaded)
 
 if not partners_list:
     st.error("В загруженных файлах нет колонки «Партнёр» или она пуста.")
