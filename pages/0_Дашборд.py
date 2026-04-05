@@ -714,30 +714,33 @@ def main():
         fee_raw = filtered["Оплачено сервисным сбором"]
         fee_numeric = pd.to_numeric(fee_raw, errors="coerce")
 
-        fee_available_mask = fee_numeric.notna()
         fee_paid_mask = fee_numeric > 0
-        fee_declined_mask = fee_available_mask & (fee_numeric == 0)
-
         fee_total = fee_numeric.fillna(0.0).sum()
+
+        fee_enabled_objects = (
+            filtered.loc[fee_paid_mask, ["Партнёр", "Адрес"]]
+            .drop_duplicates()
+        )
+
         if fee_total > 0:
             st.markdown("---")
             st.subheader("🧾 Сервисный сбор")
 
-            phone_col = filtered["Телефон"].astype(str).str.strip()
+            washes_with_fee = fee_enabled_objects.shape[0]
 
-            phones_paid = phone_col[fee_paid_mask].nunique()
-            phones_declined = phone_col[fee_declined_mask].nunique()
-            phones_had_choice = phone_col[fee_available_mask].nunique()
+            on_enabled = filtered.merge(fee_enabled_objects, on=["Партнёр", "Адрес"], how="inner")
+            on_fee_num = pd.to_numeric(on_enabled["Оплачено сервисным сбором"], errors="coerce")
+            on_paid = on_fee_num > 0
+            on_declined = on_fee_num.notna() & (on_fee_num == 0)
 
-            pct_paid_all = phones_paid / unique_clients * 100 if unique_clients > 0 else 0.0
+            phone_col = on_enabled["Телефон"].astype(str).str.strip()
+
+            phones_paid = phone_col[on_paid].nunique()
+            phones_declined = phone_col[on_declined].nunique()
+            phones_had_choice = phones_paid + phones_declined
+
             pct_paid_choice = phones_paid / phones_had_choice * 100 if phones_had_choice > 0 else 0.0
             pct_declined_choice = phones_declined / phones_had_choice * 100 if phones_had_choice > 0 else 0.0
-
-            washes_with_fee = (
-                filtered.loc[fee_available_mask, ["Партнёр", "Адрес"]]
-                .drop_duplicates()
-                .shape[0]
-            )
 
             cf1, cf2, cf3 = st.columns(3)
             cf1.metric(
@@ -747,12 +750,12 @@ def main():
             cf2.metric(
                 "Мойки с сервисным сбором",
                 f"{washes_with_fee}",
-                help="Уникальные объекты (Партнёр + Адрес) где сбор включён",
+                help="Объекты с хотя бы одной оплатой сбора (Партнёр + Адрес)",
             )
             cf3.metric(
                 "Клиентов с выбором сбора",
                 f"{phones_had_choice:,}".replace(",", " "),
-                help="Уникальные клиенты на объектах где сбор включён (5.0 или 0.0)",
+                help="Уникальные клиенты на объектах где сбор включён",
             )
 
             cf4, cf5, cf6 = st.columns(3)
