@@ -724,7 +724,13 @@ def main():
             phones_zero_fee = filtered.loc[fee_zero_mask, "Телефон"].astype(str).str.strip().nunique()
             pct_paid = phones_paid_fee / unique_clients * 100 if unique_clients > 0 else 0.0
 
-            cf1, cf2, cf3, cf4 = st.columns(4)
+            washes_with_fee = (
+                filtered.loc[fee_paid_mask, ["Партнёр", "Адрес"]]
+                .drop_duplicates()
+                .shape[0]
+            )
+
+            cf1, cf2, cf3, cf4, cf5 = st.columns(5)
             cf1.metric(
                 "Сумма сервисного сбора (₽)",
                 f"{fee_total:,.0f}".replace(",", " "),
@@ -741,6 +747,11 @@ def main():
             cf4.metric(
                 "% оплативших от всех клиентов",
                 f"{pct_paid:.1f}%",
+            )
+            cf5.metric(
+                "Мойки с сервисным сбором",
+                f"{washes_with_fee}",
+                help="Уникальные объекты (Партнёр + Адрес) с ненулевым сбором",
             )
 
     # --- DAU / WAU / MAU (только Лейка) ---
