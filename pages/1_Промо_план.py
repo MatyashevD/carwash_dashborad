@@ -8,7 +8,6 @@ import zipfile
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Промо-план", page_icon="📊", layout="wide")
 st.title("Генератор промо-плана")
 st.caption("Загрузите данные Лейки (1–3 месяца), выберите агента — система сформирует промо-план.")
 
