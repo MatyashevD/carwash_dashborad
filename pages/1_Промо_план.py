@@ -180,10 +180,11 @@ with st.sidebar.expander("Дополнительные настройки"):
 # 5. Основная область: инфо + кнопка
 # ---------------------------------------------------------------------------
 
+n_locations = len(pm["addresses"]) or "—"
 st.info(
     f"**Агент:** {selected_partner}  \n"
-    f"**Город:** {city or '—'} · **Моек:** {len(pm['washes']) or '—'} · "
-    f"**Файлов:** {len(csv_files)}"
+    f"**Город:** {city or '—'} · **Объектов (адресов):** {n_locations} · "
+    f"**Файлов данных:** {len(csv_files)}"
 )
 
 out_name = f"{_safe_filename(selected_partner)}_Promo_Plan.xlsx"
