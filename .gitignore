@@ -1,2 +1,30 @@
+# ── Данные клиентов (CSV orderTable) ──
+*.csv
+
+# ── Сгенерированные промо-планы и отчёты (содержат телефоны клиентов) ──
+*_Promo_Plan.xlsx
+*_PREDECTIVE.xlsx
+*_PREDICTIVE.md
+*_MANAGER_REPORT*.xlsx
+
+# ── Прочие данные / документы ──
+service_fee_*.xlsx
+*.pdf
+*.jpg
+*.jpeg
+*.png
+
+# ── Файлы с кириллическими именами (данные/отчёты) ──
+новые автомойки*.xlsx
+мойки_работают*.csv
+Кейс_*.pdf
+
+# ── Саранск (ранее уже исключены) ──
 *saransk*
 *SARANSK*
+
+# ── Python / IDE ──
+__pycache__/
+*.pyc
+.DS_Store
+.env
