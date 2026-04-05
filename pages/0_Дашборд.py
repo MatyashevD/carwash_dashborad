@@ -711,8 +711,11 @@ def main():
 
     # --- Сервисный сбор ---
     if "Оплачено сервисным сбором" in filtered.columns:
-        fee_raw = filtered["Оплачено сервисным сбором"]
-        fee_numeric = pd.to_numeric(fee_raw, errors="coerce")
+        fee_numeric = pd.to_numeric(
+            filtered["Оплачено сервисным сбором"]
+            .astype(str).str.replace(",", ".", regex=False),
+            errors="coerce",
+        )
 
         fee_paid_mask = fee_numeric > 0
         fee_total = fee_numeric.fillna(0.0).sum()
@@ -729,18 +732,16 @@ def main():
             washes_with_fee = fee_enabled_objects.shape[0]
 
             on_enabled = filtered.merge(fee_enabled_objects, on=["Партнёр", "Адрес"], how="inner")
-            on_fee_num = pd.to_numeric(on_enabled["Оплачено сервисным сбором"], errors="coerce")
-            on_paid = on_fee_num > 0
-            on_declined = on_fee_num.notna() & (on_fee_num == 0)
-
-            phone_col = on_enabled["Телефон"].astype(str).str.strip()
-
-            phones_paid = phone_col[on_paid].nunique()
-            phones_declined = phone_col[on_declined].nunique()
-            phones_had_choice = phones_paid + phones_declined
-
-            pct_paid_choice = phones_paid / phones_had_choice * 100 if phones_had_choice > 0 else 0.0
-            pct_declined_choice = phones_declined / phones_had_choice * 100 if phones_had_choice > 0 else 0.0
+            on_fee = pd.to_numeric(
+                on_enabled["Оплачено сервисным сбором"]
+                .astype(str).str.replace(",", ".", regex=False),
+                errors="coerce",
+            )
+            txn_paid = (on_fee > 0).sum()
+            txn_declined = (on_fee.notna() & (on_fee == 0)).sum()
+            txn_total = txn_paid + txn_declined
+            pct_paid = txn_paid / txn_total * 100 if txn_total > 0 else 0.0
+            pct_declined = txn_declined / txn_total * 100 if txn_total > 0 else 0.0
 
             cf1, cf2, cf3 = st.columns(3)
             cf1.metric(
@@ -753,27 +754,26 @@ def main():
                 help="Объекты с хотя бы одной оплатой сбора (Партнёр + Адрес)",
             )
             cf3.metric(
-                "Клиентов с выбором сбора",
-                f"{phones_had_choice:,}".replace(",", " "),
-                help="Уникальные клиенты на объектах где сбор включён",
+                "Конверсия в оплату сбора",
+                f"{pct_paid:.1f}%",
+                help=f"По транзакциям на объектах с включённым сбором: "
+                     f"{txn_paid:,} оплатили / {txn_total:,} всего. "
+                     f"Отказались: {pct_declined:.1f}%",
             )
 
             cf4, cf5, cf6 = st.columns(3)
             cf4.metric(
-                "Оплатили сбор",
-                f"{phones_paid:,}".replace(",", " "),
-                help="Уникальные клиенты, которые оплатили сервисный сбор",
+                "Транзакций с оплатой сбора",
+                f"{txn_paid:,}".replace(",", " "),
             )
             cf5.metric(
-                "Отказались от сбора",
-                f"{phones_declined:,}".replace(",", " "),
-                help="Уникальные клиенты, которые сняли галочку (0.0)",
+                "Транзакций с отказом от сбора",
+                f"{txn_declined:,}".replace(",", " "),
+                help="Клиент снял галочку сервисного сбора",
             )
             cf6.metric(
-                "% оплативших (из имевших выбор)",
-                f"{pct_paid_choice:.1f}%",
-                help=f"Оплатили / все с выбором ({phones_paid} / {phones_had_choice}). "
-                     f"Отказались: {pct_declined_choice:.1f}%",
+                "Всего транзакций (объекты со сбором)",
+                f"{txn_total:,}".replace(",", " "),
             )
 
     # --- DAU / WAU / MAU (только Лейка) ---
