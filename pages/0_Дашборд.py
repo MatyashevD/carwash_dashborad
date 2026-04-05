@@ -711,47 +711,66 @@ def main():
 
     # --- Сервисный сбор ---
     if "Оплачено сервисным сбором" in filtered.columns:
-        fee_col = pd.to_numeric(filtered["Оплачено сервисным сбором"], errors="coerce").fillna(0.0)
-        fee_total = fee_col.sum()
+        fee_raw = filtered["Оплачено сервисным сбором"]
+        fee_numeric = pd.to_numeric(fee_raw, errors="coerce")
+
+        fee_available_mask = fee_numeric.notna()
+        fee_paid_mask = fee_numeric > 0
+        fee_declined_mask = fee_available_mask & (fee_numeric == 0)
+
+        fee_total = fee_numeric.fillna(0.0).sum()
         if fee_total > 0:
             st.markdown("---")
             st.subheader("🧾 Сервисный сбор")
 
-            fee_paid_mask = fee_col > 0
-            fee_zero_mask = fee_col == 0
+            phone_col = filtered["Телефон"].astype(str).str.strip()
 
-            phones_paid_fee = filtered.loc[fee_paid_mask, "Телефон"].astype(str).str.strip().nunique()
-            phones_zero_fee = filtered.loc[fee_zero_mask, "Телефон"].astype(str).str.strip().nunique()
-            pct_paid = phones_paid_fee / unique_clients * 100 if unique_clients > 0 else 0.0
+            phones_paid = phone_col[fee_paid_mask].nunique()
+            phones_declined = phone_col[fee_declined_mask].nunique()
+            phones_had_choice = phone_col[fee_available_mask].nunique()
+
+            pct_paid_all = phones_paid / unique_clients * 100 if unique_clients > 0 else 0.0
+            pct_paid_choice = phones_paid / phones_had_choice * 100 if phones_had_choice > 0 else 0.0
+            pct_declined_choice = phones_declined / phones_had_choice * 100 if phones_had_choice > 0 else 0.0
 
             washes_with_fee = (
-                filtered.loc[fee_paid_mask, ["Партнёр", "Адрес"]]
+                filtered.loc[fee_available_mask, ["Партнёр", "Адрес"]]
                 .drop_duplicates()
                 .shape[0]
             )
 
-            cf1, cf2, cf3, cf4, cf5 = st.columns(5)
+            cf1, cf2, cf3 = st.columns(3)
             cf1.metric(
                 "Сумма сервисного сбора (₽)",
                 f"{fee_total:,.0f}".replace(",", " "),
             )
             cf2.metric(
-                "Оплатили сбор (уник. клиентов)",
-                f"{phones_paid_fee:,}".replace(",", " "),
-            )
-            cf3.metric(
-                "Не оплатили сбор (уник. клиентов)",
-                f"{phones_zero_fee:,}".replace(",", " "),
-                help="Клиенты у которых сервисный сбор = 0 (выбрали не оплачивать или сбор ещё не введён)",
-            )
-            cf4.metric(
-                "% оплативших от всех клиентов",
-                f"{pct_paid:.1f}%",
-            )
-            cf5.metric(
                 "Мойки с сервисным сбором",
                 f"{washes_with_fee}",
-                help="Уникальные объекты (Партнёр + Адрес) с ненулевым сбором",
+                help="Уникальные объекты (Партнёр + Адрес) где сбор включён",
+            )
+            cf3.metric(
+                "Клиентов с выбором сбора",
+                f"{phones_had_choice:,}".replace(",", " "),
+                help="Уникальные клиенты на объектах где сбор включён (5.0 или 0.0)",
+            )
+
+            cf4, cf5, cf6 = st.columns(3)
+            cf4.metric(
+                "Оплатили сбор",
+                f"{phones_paid:,}".replace(",", " "),
+                help="Уникальные клиенты, которые оплатили сервисный сбор",
+            )
+            cf5.metric(
+                "Отказались от сбора",
+                f"{phones_declined:,}".replace(",", " "),
+                help="Уникальные клиенты, которые сняли галочку (0.0)",
+            )
+            cf6.metric(
+                "% оплативших (из имевших выбор)",
+                f"{pct_paid_choice:.1f}%",
+                help=f"Оплатили / все с выбором ({phones_paid} / {phones_had_choice}). "
+                     f"Отказались: {pct_declined_choice:.1f}%",
             )
 
     # --- DAU / WAU / MAU (только Лейка) ---
