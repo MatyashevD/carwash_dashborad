@@ -10,10 +10,10 @@ import streamlit as st
 
 st.set_page_config(page_title="Промо-план", page_icon="📊", layout="wide")
 st.title("Генератор промо-плана")
-st.caption("Загрузите CSV или ZIP-архив с CSV (1–3 месяца), выберите партнёра и получите готовый Excel.")
+st.caption("Загрузите данные Лейки (1–3 месяца), выберите партнёра и получите готовый Excel.")
 
 # ---------------------------------------------------------------------------
-# Транслитерация для суффикса промокодов
+# Утилиты
 # ---------------------------------------------------------------------------
 
 _TRANSLIT_MAP: dict[str, str] = {
@@ -27,26 +27,25 @@ _TRANSLIT_MAP: dict[str, str] = {
 
 
 def _translit(text: str) -> str:
-    result: list[str] = []
+    out: list[str] = []
     for ch in text:
         low = ch.lower()
         if low in _TRANSLIT_MAP:
             t = _TRANSLIT_MAP[low]
-            result.append(t.upper() if ch.isupper() else t)
+            out.append(t.upper() if ch.isupper() else t)
         else:
-            result.append(ch)
-    return "".join(result)
+            out.append(ch)
+    return "".join(out)
 
 
 def _make_suffix(partner: str, city: str) -> str:
     city_part = _translit(city)[:2].upper() if city else "XX"
     nums = re.findall(r"\d+", partner)
-    num_part = nums[0] if nums else ""
-    return city_part + num_part
+    return city_part + (nums[0] if nums else "")
 
 
 def _extract_csv_buffers(uploaded_files) -> list[tuple[str, io.BytesIO]]:
-    """Из списка загруженных файлов (CSV / ZIP) вернуть список (имя, BytesIO)."""
+    """CSV и ZIP → список (имя, BytesIO с CSV)."""
     result: list[tuple[str, io.BytesIO]] = []
     for f in uploaded_files:
         f.seek(0)
@@ -57,50 +56,55 @@ def _extract_csv_buffers(uploaded_files) -> list[tuple[str, io.BytesIO]]:
                         if name.lower().endswith(".csv") and not name.startswith("__"):
                             result.append((name, io.BytesIO(zf.read(name))))
             except zipfile.BadZipFile:
-                st.sidebar.warning(f"⚠ {f.name} — повреждённый ZIP, пропущен")
+                pass
         else:
             result.append((f.name, io.BytesIO(f.read())))
     return result
 
 
+def _auto_location(washes: list[str], addresses: list[str], city: str) -> str:
+    """Авто-локация для push: улица если одна мойка, иначе город."""
+    if len(addresses) == 1 and addresses[0]:
+        parts = addresses[0].split(",")
+        if len(parts) >= 2:
+            street = parts[1].strip()
+            if street:
+                return f"на {street}"
+    if city:
+        return f"в г. {city}"
+    return ""
+
+
 # ---------------------------------------------------------------------------
-# Сайдбар: загрузка
+# 1. Загрузка данных
 # ---------------------------------------------------------------------------
 
-st.sidebar.header("1. Загрузка данных")
-st.sidebar.info(
-    "💡 **Рекомендация для Cloud:** запакуйте CSV в ZIP-архив — "
-    "файлы сжимаются в ~7 раз и загружаются за секунды."
-)
+st.sidebar.header("Загрузка данных")
+st.sidebar.caption("💡 Для Cloud рекомендуем ZIP — сжатие ~7×")
 uploaded = st.sidebar.file_uploader(
-    "CSV или ZIP с CSV (orderTable)",
+    "CSV или ZIP с orderTable",
     type=["csv", "zip"],
     accept_multiple_files=True,
 )
 
 if not uploaded:
-    st.info("Загрузите хотя бы один CSV или ZIP-файл через боковую панель.")
+    st.info("Загрузите файлы orderTable через боковую панель (CSV или ZIP с CSV).")
     st.stop()
 
 csv_files = _extract_csv_buffers(uploaded)
-
 if not csv_files:
-    st.error("Не найдено ни одного CSV-файла в загруженных данных.")
+    st.error("Не найдено ни одного CSV в загруженных файлах.")
     st.stop()
 
-st.sidebar.success(f"CSV-файлов: {len(csv_files)}")
-for name, buf in csv_files:
-    st.sidebar.caption(f"  ✓ {name} ({buf.getbuffer().nbytes / 1_048_576:.1f} МБ)")
-
 # ---------------------------------------------------------------------------
-# Извлечение партнёров — лёгкий проход только по нужным колонкам
+# 2. Быстрый парсинг метаданных (только нужные колонки, первые 50к строк)
 # ---------------------------------------------------------------------------
 
 files_key = [name for name, _ in csv_files]
-if "partners_cache" not in st.session_state or st.session_state.get("_files_key") != files_key:
-    partners: set[str] = set()
-    addresses: list[str] = []
-    washes: list[str] = []
+if "meta_cache" not in st.session_state or st.session_state.get("_fk") != files_key:
+    partners_set: set[str] = set()
+    addr_list: list[str] = []
+    wash_list: list[str] = []
     for _, buf in csv_files:
         buf.seek(0)
         try:
@@ -111,101 +115,85 @@ if "partners_cache" not in st.session_state or st.session_state.get("_files_key"
         except Exception:
             continue
         if "Партнёр" in chunk.columns:
-            partners.update(chunk["Партнёр"].dropna().unique())
-        if "Адрес" in chunk.columns and not addresses:
-            addresses = chunk["Адрес"].dropna().unique().tolist()
-        if "Автомойка" in chunk.columns and not washes:
-            washes = chunk["Автомойка"].dropna().unique().tolist()
-    st.session_state["partners_cache"] = sorted(partners)
-    st.session_state["addresses_cache"] = addresses
-    st.session_state["washes_cache"] = washes
-    st.session_state["_files_key"] = files_key
+            partners_set.update(chunk["Партнёр"].dropna().unique())
+        if "Адрес" in chunk.columns and not addr_list:
+            addr_list = chunk["Адрес"].dropna().unique().tolist()
+        if "Автомойка" in chunk.columns and not wash_list:
+            wash_list = chunk["Автомойка"].dropna().unique().tolist()
+    st.session_state["meta_cache"] = {
+        "partners": sorted(partners_set),
+        "addresses": addr_list,
+        "washes": wash_list,
+    }
+    st.session_state["_fk"] = files_key
 
-partners_list = st.session_state["partners_cache"]
-addresses_list = st.session_state["addresses_cache"]
+meta = st.session_state["meta_cache"]
 
-if not partners_list:
-    st.error("В загруженных файлах нет колонки «Партнёр» или она пуста.")
+if not meta["partners"]:
+    st.error("В файлах нет колонки «Партнёр» или она пуста.")
     st.stop()
 
 # ---------------------------------------------------------------------------
-# Сайдбар: выбор партнёра и настройки
+# 3. Выбор партнёра
 # ---------------------------------------------------------------------------
 
-st.sidebar.header("2. Выбор партнёра")
-selected_partner = st.sidebar.selectbox("Партнёр", partners_list)
-partner_regex = re.escape(selected_partner)
-
-first_addr = ""
-for a in addresses_list:
-    if a and a.strip():
-        first_addr = a.strip()
-        break
+st.sidebar.header("Партнёр")
+selected_partner = st.sidebar.selectbox("Выберите партнёра", meta["partners"])
 
 from city_coords import CITY_COORDS, find_city_coords
 
+first_addr = next((a for a in meta["addresses"] if a and a.strip()), "")
 found = find_city_coords(first_addr)
-default_city = found[0] if found else (first_addr.split(",")[0].strip() if first_addr else "")
+city = found[0] if found else (first_addr.split(",")[0].strip() if first_addr else "")
 
-st.sidebar.header("3. Настройки")
-city = st.sidebar.text_input("Город", value=default_city)
-address_short = ""
-if first_addr:
-    parts = first_addr.split(",")
-    if len(parts) >= 2:
-        address_short = f"на {parts[1].strip()}"
-address_short = st.sidebar.text_input("Локация для push (напр. «на Светлогорской»)", value=address_short)
-
+coords = (found[1], found[2]) if found else CITY_COORDS.get(city)
+location = _auto_location(meta["washes"], meta["addresses"], city)
 sfx = _make_suffix(selected_partner, city)
-promo_suffix = st.sidebar.text_input("Суффикс промокодов", value=sfx)
-
-coords = None
-if found:
-    coords = (found[1], found[2])
-elif city in CITY_COORDS:
-    coords = CITY_COORDS[city]
-
-include_weather = st.sidebar.checkbox("Включить погоду и загрузку", value=coords is not None)
 
 # ---------------------------------------------------------------------------
-# Превью
+# 4. Дополнительные настройки (свёрнуты по умолчанию)
+# ---------------------------------------------------------------------------
+
+with st.sidebar.expander("Дополнительные настройки"):
+    city = st.text_input("Город", value=city)
+    location = st.text_input("Локация для push", value=location,
+                             help="Автоматически: улица (1 мойка) или город (несколько)")
+    sfx = st.text_input("Суффикс промокодов", value=sfx)
+    include_weather = st.checkbox("Включить погоду", value=coords is not None)
+
+# ---------------------------------------------------------------------------
+# 5. Превью и кнопка генерации
 # ---------------------------------------------------------------------------
 
 st.subheader("Превью")
-col1, col2, col3 = st.columns(3)
-col1.metric("Партнёр", selected_partner)
-col2.metric("Город", city or "—")
-col3.metric("CSV-файлов", len(csv_files))
-
-st.markdown(f"**Суффикс промокодов:** `{promo_suffix}` · **Погода:** {'да' if include_weather and coords else 'нет'}")
-
-# ---------------------------------------------------------------------------
-# Генерация (тяжёлые импорты — только по нажатию кнопки)
-# ---------------------------------------------------------------------------
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Партнёр", selected_partner)
+c2.metric("Город", city or "—")
+c3.metric("Моек", len(meta["washes"]) or "—")
+c4.metric("Файлов", len(csv_files))
 
 if st.button("Сформировать промо-план", type="primary", use_container_width=True):
-    progress = st.progress(0, text="Подготовка…")
+    bar = st.progress(0, text="Подготовка…")
 
-    def _update_progress(v: float):
-        pct = int(v * 100)
-        labels = {
-            5: "Чтение CSV…", 15: "Загрузка данных…", 20: "Фильтрация…",
-            30: "Расчёт визитов…", 40: "RFM-сегментация…", 50: "Когорты…",
-            60: "Погода…", 70: "Промо-список…", 75: "Бюджет…",
-            80: "Сборка Excel…", 90: "Когорты + бюджет…", 95: "Оформление…",
-            100: "Готово!",
-        }
-        closest = min(labels.keys(), key=lambda k: abs(k - pct))
-        progress.progress(v, text=labels[closest])
+    _LABELS = {
+        5: "Чтение CSV…", 15: "Загрузка…", 20: "Фильтрация…",
+        30: "Визиты…", 40: "RFM-сегментация…", 50: "Когорты…",
+        60: "Погода…", 70: "Промо-список…", 75: "Бюджет…",
+        80: "Excel…", 90: "Оформление…", 95: "Стилизация…", 100: "Готово!",
+    }
+
+    def _progress(v: float):
+        closest = min(_LABELS, key=lambda k: abs(k - int(v * 100)))
+        bar.progress(v, text=_LABELS[closest])
 
     from promo_pipeline import PromoConfig, generate_promo_plan
 
     config = PromoConfig(
         partner_display_name=selected_partner,
-        partner_filter=partner_regex,
+        partner_filter=re.escape(selected_partner),
         city=city,
-        address_short=address_short,
-        promo_suffix=promo_suffix,
+        address_short=location,
+        promo_suffix=sfx,
         weather_coords=coords if include_weather else None,
         include_weather=include_weather and coords is not None,
     )
@@ -216,45 +204,40 @@ if st.button("Сформировать промо-план", type="primary", use
         buffers.append(io.BytesIO(buf.read()))
 
     try:
-        xlsx_buf = generate_promo_plan(config, buffers, progress_cb=_update_progress)
+        xlsx_buf = generate_promo_plan(config, buffers, progress_cb=_progress)
     except ValueError as e:
         st.error(str(e))
         st.stop()
     except Exception as e:
-        st.error(f"Ошибка генерации: {e}")
+        st.error(f"Ошибка: {e}")
         st.stop()
 
     st.session_state["xlsx_buf"] = xlsx_buf.getvalue()
     st.session_state["xlsx_name"] = f"Promo_Plan_{city or 'report'}.xlsx"
-    progress.progress(1.0, text="Готово!")
-    st.success("Промо-план сформирован!")
+    bar.progress(1.0, text="Готово!")
 
 # ---------------------------------------------------------------------------
-# Скачивание
+# 6. Результат и скачивание
 # ---------------------------------------------------------------------------
 
 if "xlsx_buf" in st.session_state:
     st.divider()
-    st.subheader("Результат")
+    st.success("Промо-план готов!")
 
-    xl = pd.ExcelFile(io.BytesIO(st.session_state["xlsx_buf"]))
-    tabs = st.tabs(["Сегменты", "Бюджет", "Скачать"])
+    st.download_button(
+        label=f"⬇ Скачать {st.session_state['xlsx_name']}",
+        data=st.session_state["xlsx_buf"],
+        file_name=st.session_state["xlsx_name"],
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
+        use_container_width=True,
+    )
 
-    with tabs[0]:
+    with st.expander("Предпросмотр: RFM-сегменты"):
+        xl = pd.ExcelFile(io.BytesIO(st.session_state["xlsx_buf"]))
         rfm_df = pd.read_excel(xl, sheet_name="RFM сегменты", header=3)
-        rfm_df = rfm_df.dropna(how="all").head(7)
-        st.dataframe(rfm_df, use_container_width=True)
+        st.dataframe(rfm_df.dropna(how="all").head(7), use_container_width=True)
 
-    with tabs[1]:
+    with st.expander("Предпросмотр: Бюджет"):
         bud_df = pd.read_excel(xl, sheet_name="Бюджет промо", header=3)
-        bud_df = bud_df.dropna(how="all").head(8)
-        st.dataframe(bud_df, use_container_width=True)
-
-    with tabs[2]:
-        st.download_button(
-            label=f"Скачать {st.session_state['xlsx_name']}",
-            data=st.session_state["xlsx_buf"],
-            file_name=st.session_state["xlsx_name"],
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
+        st.dataframe(bud_df.dropna(how="all").head(8), use_container_width=True)
