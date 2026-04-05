@@ -48,6 +48,7 @@ def load_data(file) -> pd.DataFrame:
         "Начислено кешбека",
         "Оплачено сервисным сбором",
     ]
+    fee_col_name = "Оплачено сервисным сбором"
     for col in num_cols:
         if col in df.columns:
             df[col] = (
@@ -57,7 +58,10 @@ def load_data(file) -> pd.DataFrame:
                 .str.replace(" ", "", regex=False)
                 .str.replace(",", ".", regex=False)
             )
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+            if col == fee_col_name:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+            else:
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
     df["Дата оплаты"] = pd.to_datetime(df["Дата оплаты"], errors="coerce")
     df["date"] = df["Дата оплаты"].dt.date
@@ -711,11 +715,7 @@ def main():
 
     # --- Сервисный сбор ---
     if "Оплачено сервисным сбором" in filtered.columns:
-        fee_numeric = pd.to_numeric(
-            filtered["Оплачено сервисным сбором"]
-            .astype(str).str.replace(",", ".", regex=False),
-            errors="coerce",
-        )
+        fee_numeric = filtered["Оплачено сервисным сбором"]
 
         fee_paid_mask = fee_numeric > 0
         fee_total = fee_numeric.fillna(0.0).sum()
@@ -732,11 +732,7 @@ def main():
             washes_with_fee = fee_enabled_objects.shape[0]
 
             on_enabled = filtered.merge(fee_enabled_objects, on=["Партнёр", "Адрес"], how="inner")
-            on_fee = pd.to_numeric(
-                on_enabled["Оплачено сервисным сбором"]
-                .astype(str).str.replace(",", ".", regex=False),
-                errors="coerce",
-            )
+            on_fee = on_enabled["Оплачено сервисным сбором"]
             txn_paid = (on_fee > 0).sum()
             txn_declined = (on_fee.notna() & (on_fee == 0)).sum()
             txn_total = txn_paid + txn_declined
