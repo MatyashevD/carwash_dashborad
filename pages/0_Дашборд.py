@@ -46,6 +46,7 @@ def load_data(file) -> pd.DataFrame:
         "Оплачено деньгами",
         "Оплачено бонусами",
         "Начислено кешбека",
+        "Оплачено сервисным сбором",
     ]
     for col in num_cols:
         if col in df.columns:
@@ -707,6 +708,40 @@ def main():
         st.caption(
             f"Не учтено подписок (покупка/продление кешбэка): **{ops_subscriptions:,}**".replace(",", " ")
         )
+
+    # --- Сервисный сбор ---
+    if "Оплачено сервисным сбором" in filtered.columns:
+        fee_col = filtered["Оплачено сервисным сбором"]
+        fee_total = fee_col.sum()
+        if fee_total > 0:
+            st.markdown("---")
+            st.subheader("🧾 Сервисный сбор")
+
+            fee_paid_mask = fee_col > 0
+            fee_zero_mask = fee_col == 0
+
+            phones_paid_fee = filtered.loc[fee_paid_mask, "Телефон"].astype(str).str.strip().nunique()
+            phones_zero_fee = filtered.loc[fee_zero_mask, "Телефон"].astype(str).str.strip().nunique()
+            pct_paid = phones_paid_fee / unique_clients * 100 if unique_clients > 0 else 0.0
+
+            cf1, cf2, cf3, cf4 = st.columns(4)
+            cf1.metric(
+                "Сумма сервисного сбора (₽)",
+                f"{fee_total:,.0f}".replace(",", " "),
+            )
+            cf2.metric(
+                "Оплатили сбор (уник. клиентов)",
+                f"{phones_paid_fee:,}".replace(",", " "),
+            )
+            cf3.metric(
+                "Не оплатили сбор (уник. клиентов)",
+                f"{phones_zero_fee:,}".replace(",", " "),
+                help="Клиенты у которых сервисный сбор = 0 (выбрали не оплачивать или сбор ещё не введён)",
+            )
+            cf4.metric(
+                "% оплативших от всех клиентов",
+                f"{pct_paid:.1f}%",
+            )
 
     # --- DAU / WAU / MAU (только Лейка) ---
     st.markdown("---")
