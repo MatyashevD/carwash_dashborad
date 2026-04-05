@@ -10,7 +10,7 @@ import streamlit as st
 
 st.set_page_config(page_title="Промо-план", page_icon="📊", layout="wide")
 st.title("Генератор промо-плана")
-st.caption("Загрузите данные Лейки (1–3 месяца), выберите партнёра и получите готовый Excel.")
+st.caption("Загрузите данные Лейки (1–3 месяца), выберите агента — система сформирует промо-план.")
 
 # ---------------------------------------------------------------------------
 # Утилиты
@@ -62,7 +62,7 @@ def _extract_csv_buffers(uploaded_files) -> list[tuple[str, io.BytesIO]]:
     return result
 
 
-def _auto_location(washes: list[str], addresses: list[str], city: str) -> str:
+def _auto_location(addresses: list[str], city: str) -> str:
     """Авто-локация для push: улица если одна мойка, иначе город."""
     if len(addresses) == 1 and addresses[0]:
         parts = addresses[0].split(",")
@@ -75,11 +75,18 @@ def _auto_location(washes: list[str], addresses: list[str], city: str) -> str:
     return ""
 
 
+def _safe_filename(partner: str) -> str:
+    """Имя партнёра → безопасное имя файла."""
+    safe = re.sub(r'[<>:"/\\|?*]', '', partner).strip()
+    safe = re.sub(r'\s+', ' ', safe)
+    return safe
+
+
 # ---------------------------------------------------------------------------
 # 1. Загрузка данных
 # ---------------------------------------------------------------------------
 
-st.sidebar.header("Загрузка данных")
+st.sidebar.header("1. Загрузите данные")
 st.sidebar.caption("💡 Для Cloud рекомендуем ZIP — сжатие ~7×")
 uploaded = st.sidebar.file_uploader(
     "CSV или ZIP с orderTable",
@@ -88,7 +95,7 @@ uploaded = st.sidebar.file_uploader(
 )
 
 if not uploaded:
-    st.info("Загрузите файлы orderTable через боковую панель (CSV или ZIP с CSV).")
+    st.info("⬅ Загрузите файлы orderTable через боковую панель (CSV или ZIP с CSV).")
     st.stop()
 
 csv_files = _extract_csv_buffers(uploaded)
@@ -97,14 +104,12 @@ if not csv_files:
     st.stop()
 
 # ---------------------------------------------------------------------------
-# 2. Быстрый парсинг метаданных (только нужные колонки, первые 50к строк)
+# 2. Парсинг метаданных: партнёр → адреса/мойки
 # ---------------------------------------------------------------------------
 
 files_key = [name for name, _ in csv_files]
 if "meta_cache" not in st.session_state or st.session_state.get("_fk") != files_key:
-    partners_set: set[str] = set()
-    addr_list: list[str] = []
-    wash_list: list[str] = []
+    rows: list[pd.DataFrame] = []
     for _, buf in csv_files:
         buf.seek(0)
         try:
@@ -112,19 +117,25 @@ if "meta_cache" not in st.session_state or st.session_state.get("_fk") != files_
                 buf, sep=";", encoding="utf-8-sig", dtype=str, nrows=50_000,
                 usecols=lambda c: c in ("Партнёр", "Адрес", "Автомойка"),
             )
+            rows.append(chunk)
         except Exception:
             continue
-        if "Партнёр" in chunk.columns:
-            partners_set.update(chunk["Партнёр"].dropna().unique())
-        if "Адрес" in chunk.columns and not addr_list:
-            addr_list = chunk["Адрес"].dropna().unique().tolist()
-        if "Автомойка" in chunk.columns and not wash_list:
-            wash_list = chunk["Автомойка"].dropna().unique().tolist()
-    st.session_state["meta_cache"] = {
-        "partners": sorted(partners_set),
-        "addresses": addr_list,
-        "washes": wash_list,
-    }
+
+    if rows:
+        meta_df = pd.concat(rows, ignore_index=True)
+    else:
+        meta_df = pd.DataFrame()
+
+    partners = sorted(meta_df["Партнёр"].dropna().unique()) if "Партнёр" in meta_df.columns else []
+
+    partner_meta: dict[str, dict] = {}
+    for p in partners:
+        sub = meta_df[meta_df["Партнёр"] == p]
+        addrs = sub["Адрес"].dropna().unique().tolist() if "Адрес" in sub.columns else []
+        wshs = sub["Автомойка"].dropna().unique().tolist() if "Автомойка" in sub.columns else []
+        partner_meta[p] = {"addresses": addrs, "washes": wshs}
+
+    st.session_state["meta_cache"] = {"partners": partners, "partner_meta": partner_meta}
     st.session_state["_fk"] = files_key
 
 meta = st.session_state["meta_cache"]
@@ -134,43 +145,48 @@ if not meta["partners"]:
     st.stop()
 
 # ---------------------------------------------------------------------------
-# 3. Выбор партнёра
+# 3. Выбор агента → определение города/адреса
 # ---------------------------------------------------------------------------
 
-st.sidebar.header("Партнёр")
-selected_partner = st.sidebar.selectbox("Выберите партнёра", meta["partners"])
+st.sidebar.header("2. Выберите агента")
+selected_partner = st.sidebar.selectbox(
+    "Агент", meta["partners"],
+    help="После выбора агента нажмите «Сформировать промо-план»",
+)
+
+pm = meta["partner_meta"].get(selected_partner, {"addresses": [], "washes": []})
 
 from city_coords import CITY_COORDS, find_city_coords
 
-first_addr = next((a for a in meta["addresses"] if a and a.strip()), "")
+first_addr = next((a for a in pm["addresses"] if a and a.strip()), "")
 found = find_city_coords(first_addr)
 city = found[0] if found else (first_addr.split(",")[0].strip() if first_addr else "")
-
 coords = (found[1], found[2]) if found else CITY_COORDS.get(city)
-location = _auto_location(meta["washes"], meta["addresses"], city)
+location = _auto_location(pm["addresses"], city)
 sfx = _make_suffix(selected_partner, city)
 
 # ---------------------------------------------------------------------------
-# 4. Дополнительные настройки (свёрнуты по умолчанию)
+# 4. Дополнительные настройки (свёрнуты)
 # ---------------------------------------------------------------------------
 
 with st.sidebar.expander("Дополнительные настройки"):
     city = st.text_input("Город", value=city)
     location = st.text_input("Локация для push", value=location,
-                             help="Автоматически: улица (1 мойка) или город (несколько)")
+                             help="Авто: улица (1 мойка) или город (несколько)")
     sfx = st.text_input("Суффикс промокодов", value=sfx)
     include_weather = st.checkbox("Включить погоду", value=coords is not None)
 
 # ---------------------------------------------------------------------------
-# 5. Превью и кнопка генерации
+# 5. Основная область: инфо + кнопка
 # ---------------------------------------------------------------------------
 
-st.subheader("Превью")
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Партнёр", selected_partner)
-c2.metric("Город", city or "—")
-c3.metric("Моек", len(meta["washes"]) or "—")
-c4.metric("Файлов", len(csv_files))
+st.info(
+    f"**Агент:** {selected_partner}  \n"
+    f"**Город:** {city or '—'} · **Моек:** {len(pm['washes']) or '—'} · "
+    f"**Файлов:** {len(csv_files)}"
+)
+
+out_name = f"{_safe_filename(selected_partner)}_Promo_Plan.xlsx"
 
 if st.button("Сформировать промо-план", type="primary", use_container_width=True):
     bar = st.progress(0, text="Подготовка…")
@@ -213,11 +229,11 @@ if st.button("Сформировать промо-план", type="primary", use
         st.stop()
 
     st.session_state["xlsx_buf"] = xlsx_buf.getvalue()
-    st.session_state["xlsx_name"] = f"Promo_Plan_{city or 'report'}.xlsx"
+    st.session_state["xlsx_name"] = out_name
     bar.progress(1.0, text="Готово!")
 
 # ---------------------------------------------------------------------------
-# 6. Результат и скачивание
+# 6. Результат
 # ---------------------------------------------------------------------------
 
 if "xlsx_buf" in st.session_state:
