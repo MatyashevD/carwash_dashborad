@@ -7,6 +7,8 @@ import numpy as np
 
 from city_coords import CITY_COORDS
 
+_CACHE_VERSION = 2
+
 
 def extract_csv_from_uploads(uploaded_files) -> list:
     """Принимает CSV и ZIP, возвращает список file-like объектов с CSV."""
@@ -49,6 +51,9 @@ def load_data(file) -> pd.DataFrame:
         "Оплачено сервисным сбором",
     ]
     fee_col_name = "Оплачено сервисным сбором"
+    if fee_col_name in df.columns:
+        df["_fee_has_value"] = df[fee_col_name].notna() & (df[fee_col_name].str.strip() != "")
+
     for col in num_cols:
         if col in df.columns:
             df[col] = (
@@ -58,10 +63,7 @@ def load_data(file) -> pd.DataFrame:
                 .str.replace(" ", "", regex=False)
                 .str.replace(",", ".", regex=False)
             )
-            if col == fee_col_name:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-            else:
-                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
     df["Дата оплаты"] = pd.to_datetime(df["Дата оплаты"], errors="coerce")
     df["date"] = df["Дата оплаты"].dt.date
@@ -322,7 +324,7 @@ def main():
     file_labels = [f.name for f in uploaded_files]
 
     # Кэш загруженных данных в session_state (по именам файлов)
-    cache_key = tuple(file_labels)
+    cache_key = (_CACHE_VERSION, tuple(file_labels))
     if st.session_state.get("_app_cache_key") != cache_key:
         with st.spinner("Чтение данных…"):
             loaded: dict[str, pd.DataFrame] = {}
@@ -714,16 +716,14 @@ def main():
         )
 
     # --- Сервисный сбор ---
-    if "Оплачено сервисным сбором" in filtered.columns:
-        fee_numeric = filtered["Оплачено сервисным сбором"]
-        fee_notna = fee_numeric.notna()
-        fee_paid_mask = fee_numeric > 0
-        fee_declined_mask = fee_notna & (fee_numeric == 0)
+    if "_fee_has_value" in filtered.columns:
+        fee_has = filtered["_fee_has_value"].fillna(False)
+        fee_val = filtered.loc[fee_has, "Оплачено сервисным сбором"]
 
-        txn_paid = fee_paid_mask.sum()
-        txn_declined = fee_declined_mask.sum()
+        txn_paid = (fee_val > 0).sum()
+        txn_declined = (fee_val == 0).sum()
         txn_total = txn_paid + txn_declined
-        fee_total = fee_numeric.fillna(0.0).sum()
+        fee_total = fee_val.sum()
 
         if txn_total > 0:
             st.markdown("---")
@@ -731,7 +731,7 @@ def main():
 
             pct_paid = txn_paid / txn_total * 100
             washes_with_fee = (
-                filtered.loc[fee_notna, ["Партнёр", "Адрес"]]
+                filtered.loc[fee_has, ["Партнёр", "Адрес"]]
                 .drop_duplicates()
                 .shape[0]
             )
