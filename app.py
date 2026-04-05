@@ -38,7 +38,6 @@ TBANK_PHONE = "71119999991"  # Партнёр Т-Банк, клиент "Т Ба
 _CATEGORY_COLS = ["Партнёр", "Автомойка", "Адрес", "wash_key", "Город", "Тип оплаты"]
 
 
-@st.cache_data
 def load_data(file) -> pd.DataFrame:
     """Читает CSV в формате orderTable, приводит числа и даты."""
     if hasattr(file, "seek"):
@@ -85,7 +84,6 @@ def load_data(file) -> pd.DataFrame:
 _DEDUP_COLS = ["Телефон", "Дата оплаты", "Автомойка", "Поступило на бокс"]
 
 
-@st.cache_data
 def merge_and_deduplicate(files) -> pd.DataFrame:
     """Объединяет несколько CSV в один DataFrame с дедупликацией."""
     frames = []
@@ -321,6 +319,18 @@ def main():
 
     file_labels = [f.name for f in uploaded_files]
 
+    # Кэш загруженных данных в session_state (по именам файлов)
+    cache_key = tuple(file_labels)
+    if st.session_state.get("_app_cache_key") != cache_key:
+        with st.spinner("Чтение данных…"):
+            loaded: dict[str, pd.DataFrame] = {}
+            for f in uploaded_files:
+                loaded[f.name] = load_data(f)
+            st.session_state["_app_loaded"] = loaded
+            st.session_state["_app_cache_key"] = cache_key
+
+    loaded = st.session_state["_app_loaded"]
+
     # Режим данных: один файл или объединение всех
     if len(uploaded_files) > 1:
         data_mode = st.sidebar.radio(
@@ -334,10 +344,23 @@ def main():
 
     if data_mode == "Один файл":
         selected_label = st.sidebar.selectbox("Выберите файл", file_labels)
-        selected_file = next(f for f in uploaded_files if f.name == selected_label)
-        df = load_data(selected_file)
+        df = loaded[selected_label]
     else:
-        df = merge_and_deduplicate(uploaded_files)
+        frames = []
+        for name, part in loaded.items():
+            p = part.copy()
+            p["_source_file"] = name
+            frames.append(p)
+        merged = pd.concat(frames, ignore_index=True)
+        before = len(merged)
+        existing = [c for c in _DEDUP_COLS if c in merged.columns]
+        if existing:
+            merged = merged.drop_duplicates(subset=existing, keep="first")
+        merged.attrs["dedup_removed"] = before - len(merged)
+        for col in _CATEGORY_COLS:
+            if col in merged.columns:
+                merged[col] = merged[col].astype("category")
+        df = merged
         dedup_removed = df.attrs.get("dedup_removed", 0)
         selected_label = f"Объединено {len(uploaded_files)} файлов"
         if dedup_removed > 0:
