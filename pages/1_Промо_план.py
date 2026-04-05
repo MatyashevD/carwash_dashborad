@@ -18,14 +18,30 @@ st.caption("Загрузите CSV-файлы Лейки (1–3 месяца), �
 # Транслитерация для суффикса промокодов
 # ---------------------------------------------------------------------------
 
-_TRANSLIT = str.maketrans(
-    "абвгдежзийклмнопрстуфхцчшщъыьэюяАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ",
-    "abvgdezhziiklmnoprstufhcchshshhyeyuyaABVGDEZHZIIKLMNOPRSTUFHCCHSHSHHYEYUYA",
-)
+_TRANSLIT_MAP: dict[str, str] = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e",
+    "ж": "zh", "з": "z", "и": "i", "й": "i", "к": "k", "л": "l",
+    "м": "m", "н": "n", "о": "o", "п": "p", "р": "r", "с": "s",
+    "т": "t", "у": "u", "ф": "f", "х": "h", "ц": "c", "ч": "ch",
+    "ш": "sh", "щ": "sh", "ъ": "", "ы": "y", "ь": "", "э": "e",
+    "ю": "yu", "я": "ya",
+}
+
+
+def _translit(text: str) -> str:
+    result: list[str] = []
+    for ch in text:
+        low = ch.lower()
+        if low in _TRANSLIT_MAP:
+            t = _TRANSLIT_MAP[low]
+            result.append(t.upper() if ch.isupper() else t)
+        else:
+            result.append(ch)
+    return "".join(result)
 
 
 def _make_suffix(partner: str, city: str) -> str:
-    city_part = city.translate(_TRANSLIT)[:2].upper() if city else "XX"
+    city_part = _translit(city)[:2].upper() if city else "XX"
     nums = re.findall(r"\d+", partner)
     num_part = nums[0] if nums else ""
     return city_part + num_part
