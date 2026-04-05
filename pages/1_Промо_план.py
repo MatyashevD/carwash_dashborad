@@ -7,9 +7,6 @@ import re
 import pandas as pd
 import streamlit as st
 
-from city_coords import CITY_COORDS, find_city_coords
-from promo_pipeline import PromoConfig, generate_promo_plan, SEGMENT_ORDER, INITIATIVE_RU
-
 st.set_page_config(page_title="Промо-план", page_icon="📊", layout="wide")
 st.title("Генератор промо-плана")
 st.caption("Загрузите CSV-файлы Лейки (1–3 месяца), выберите партнёра и получите готовый Excel.")
@@ -48,7 +45,7 @@ def _make_suffix(partner: str, city: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Сайдбар: загрузка, выбор, настройки
+# Сайдбар: загрузка
 # ---------------------------------------------------------------------------
 
 st.sidebar.header("1. Загрузка данных")
@@ -60,44 +57,60 @@ if not uploaded:
     st.info("Загрузите хотя бы один CSV-файл через боковую панель.")
     st.stop()
 
+st.sidebar.success(f"Загружено файлов: {len(uploaded)}")
+for f in uploaded:
+    st.sidebar.caption(f"  ✓ {f.name} ({f.size / 1_048_576:.1f} МБ)")
 
-def _read_partners(files) -> tuple[list[str], list[str], list[str]]:
-    """Быстрый проход по файлам: список партнёров, первые адрес + мойка."""
+# ---------------------------------------------------------------------------
+# Извлечение партнёров — лёгкий проход только по нужным колонкам
+# ---------------------------------------------------------------------------
+
+if "partners_cache" not in st.session_state or st.session_state.get("_files_key") != [f.name for f in uploaded]:
     partners: set[str] = set()
     addresses: list[str] = []
     washes: list[str] = []
-    for f in files:
+    for f in uploaded:
         f.seek(0)
         try:
-            df = pd.read_csv(f, sep=";", encoding="utf-8-sig", dtype=str)
+            chunk = pd.read_csv(
+                f, sep=";", encoding="utf-8-sig", dtype=str, nrows=50_000,
+                usecols=lambda c: c in ("Партнёр", "Адрес", "Автомойка"),
+            )
         except Exception:
             continue
-        if "Партнёр" in df.columns:
-            partners.update(df["Партнёр"].dropna().unique())
-        if "Адрес" in df.columns and not addresses:
-            addresses = df["Адрес"].dropna().unique().tolist()
-        if "Автомойка" in df.columns and not washes:
-            washes = df["Автомойка"].dropna().unique().tolist()
-    return sorted(partners), addresses, washes
+        if "Партнёр" in chunk.columns:
+            partners.update(chunk["Партнёр"].dropna().unique())
+        if "Адрес" in chunk.columns and not addresses:
+            addresses = chunk["Адрес"].dropna().unique().tolist()
+        if "Автомойка" in chunk.columns and not washes:
+            washes = chunk["Автомойка"].dropna().unique().tolist()
+    st.session_state["partners_cache"] = sorted(partners)
+    st.session_state["addresses_cache"] = addresses
+    st.session_state["washes_cache"] = washes
+    st.session_state["_files_key"] = [f.name for f in uploaded]
 
-
-with st.spinner("Чтение CSV…"):
-    partners_list, addresses_list, washes_list = _read_partners(uploaded)
+partners_list = st.session_state["partners_cache"]
+addresses_list = st.session_state["addresses_cache"]
 
 if not partners_list:
     st.error("В загруженных файлах нет колонки «Партнёр» или она пуста.")
     st.stop()
 
+# ---------------------------------------------------------------------------
+# Сайдбар: выбор партнёра и настройки
+# ---------------------------------------------------------------------------
+
 st.sidebar.header("2. Выбор партнёра")
 selected_partner = st.sidebar.selectbox("Партнёр", partners_list)
 partner_regex = re.escape(selected_partner)
 
-# --- Автоопределение города ---
 first_addr = ""
 for a in addresses_list:
     if a and a.strip():
         first_addr = a.strip()
         break
+
+from city_coords import CITY_COORDS, find_city_coords  # лёгкий модуль
 
 found = find_city_coords(first_addr)
 default_city = found[0] if found else (first_addr.split(",")[0].strip() if first_addr else "")
@@ -135,7 +148,7 @@ col3.metric("Файлов загружено", len(uploaded))
 st.markdown(f"**Суффикс промокодов:** `{promo_suffix}` · **Погода:** {'да' if include_weather and coords else 'нет'}")
 
 # ---------------------------------------------------------------------------
-# Генерация
+# Генерация (тяжёлые импорты — только по нажатию кнопки)
 # ---------------------------------------------------------------------------
 
 if st.button("Сформировать промо-план", type="primary", use_container_width=True):
@@ -152,6 +165,8 @@ if st.button("Сформировать промо-план", type="primary", use
         }
         closest = min(labels.keys(), key=lambda k: abs(k - pct))
         progress.progress(v, text=labels[closest])
+
+    from promo_pipeline import PromoConfig, generate_promo_plan  # lazy import
 
     config = PromoConfig(
         partner_display_name=selected_partner,
