@@ -731,7 +731,7 @@ def main():
 
             pct_paid = txn_paid / txn_total * 100
             washes_with_fee = (
-                filtered.loc[fee_has & (filtered["Оплачено сервисным сбором"] > 0), ["Партнёр", "Адрес"]]
+                filtered.loc[fee_has, ["Партнёр", "Адрес"]]
                 .drop_duplicates()
                 .shape[0]
             )
