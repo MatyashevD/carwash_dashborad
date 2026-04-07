@@ -730,8 +730,8 @@ def main():
             st.subheader("🧾 Сервисный сбор")
 
             pct_paid = txn_paid / txn_total * 100
-            washes_with_fee = (
-                filtered.loc[fee_has, ["Партнёр", "Адрес"]]
+            washes_paid = (
+                filtered.loc[fee_has & (filtered["Оплачено сервисным сбором"] > 0), ["Партнёр", "Адрес"]]
                 .drop_duplicates()
                 .shape[0]
             )
@@ -742,9 +742,9 @@ def main():
                 f"{fee_total:,.0f}".replace(",", " "),
             )
             cf2.metric(
-                "Мойки с сервисным сбором",
-                f"{washes_with_fee}",
-                help="Объекты где поле сервисного сбора заполнено (Партнёр + Адрес)",
+                "Мойки",
+                f"{washes_paid}",
+                help="Объекты где оплата сервисного сбора > 0",
             )
             cf3.metric(
                 "Конверсия в оплату сбора",
