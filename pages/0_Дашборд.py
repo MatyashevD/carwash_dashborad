@@ -666,21 +666,30 @@ def main():
     yandex_count = len(filtered[filtered["partner_category"] == "Яндекс"])
     tbank_count = len(filtered[filtered["partner_category"] == "Т-Банк"])
     
-    col_partner1, col_partner2, col_partner3 = st.columns(3)
-    col_partner1.metric(
+    leyka_money = filtered.loc[
+        filtered["partner_category"] == "Лейка", "Оплачено деньгами"
+    ].sum()
+
+    col_p1, col_p2, col_p3, col_p4 = st.columns(4)
+    col_p1.metric(
         "Выручка Лейка (₽)",
         f"{leyka_total:,.0f}".replace(",", " "),
-        help=f"Записей: {leyka_count}"
+        help=f"Поступило на бокс. Записей: {leyka_count}",
     )
-    col_partner2.metric(
+    col_p2.metric(
+        "Лейка оплачено деньгами (₽)",
+        f"{leyka_money:,.0f}".replace(",", " "),
+        help="Без учёта бонусов",
+    )
+    col_p3.metric(
         "Выручка Яндекс (₽)",
         f"{yandex_total:,.0f}".replace(",", " "),
-        help=f"Записей: {yandex_count}"
+        help=f"Записей: {yandex_count}",
     )
-    col_partner3.metric(
+    col_p4.metric(
         "Выручка Т-Банк (₽)",
         f"{tbank_total:,.0f}".replace(",", " "),
-        help=f"Записей: {tbank_count}"
+        help=f"Записей: {tbank_count}",
     )
 
     # --- Операции по партнёрам (база для сервисного сбора) ---
