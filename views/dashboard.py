@@ -858,16 +858,21 @@ def main():
 
     if not leyka_data.empty:
         try:
+            # Важно: Партнёр/Автомойка/Адрес — category. groupby без observed=True
+            # на Cloud раздувает память (декартово произведение категорий) и роняет процесс.
+            wash_src = leyka_data[["Партнёр", "Автомойка", "Адрес", "phone_norm"]].copy()
+            for col in ("Партнёр", "Автомойка", "Адрес"):
+                wash_src[col] = wash_src[col].astype(str).fillna("")
+            wash_src = wash_src[wash_src["Адрес"].str.strip() != ""].copy()
+
             wash_loc = (
-                leyka_data.groupby(["Партнёр", "Автомойка", "Адрес"], dropna=False)
+                wash_src.groupby(["Партнёр", "Автомойка", "Адрес"], dropna=False, observed=True)
                 .agg(
                     users=("phone_norm", "nunique"),
                     tx=("phone_norm", "size"),
                 )
                 .reset_index()
             )
-            wash_loc["Адрес"] = wash_loc["Адрес"].fillna("").astype(str)
-            wash_loc = wash_loc[wash_loc["Адрес"].str.strip() != ""].copy()
 
             geo_labels, lats, lons = [], [], []
             for addr, partner in zip(
