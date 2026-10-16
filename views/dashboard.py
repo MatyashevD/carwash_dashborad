@@ -894,7 +894,11 @@ def main():
             wash_on_map["longitude"] = spread_lon
 
             map_data = wash_on_map[["latitude", "longitude", "users"]].copy()
-            st.map(map_data, size="users", use_container_width=True)
+            try:
+                st.map(map_data, size="users", use_container_width=True)
+            except TypeError:
+                # Старые версии Streamlit без size=column
+                st.map(map_data, use_container_width=True)
             st.caption(
                 f"Размер точки — уникальные пользователи мойки. "
                 f"Моек на карте: {len(wash_on_map)} из {len(wash_loc)} "
