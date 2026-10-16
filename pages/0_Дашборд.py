@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-from city_coords import CITY_COORDS
+from city_coords import resolve_wash_coords, spread_overlapping_points
 
 _CACHE_VERSION = 2
 
@@ -848,58 +848,114 @@ def main():
     else:
         st.info("Недостаточно данных для расчёта DAU/WAU/MAU.")
 
-    # --- Карта активных пользователей Лейки по городам ---
+    # --- Карта активных моек (локации с транзакциями) ---
     st.markdown("---")
-    st.subheader("🗺️ Активные пользователи Лейки по городам")
+    st.subheader("🗺️ Активные мойки на карте")
+    st.caption(
+        "Точка = мойка (адрес), по которой были транзакции в выбранном периоде. "
+        "Город и область (например, Санкт-Петербург + п. Бугры) отображаются отдельно."
+    )
 
     if not leyka_data.empty:
-        leyka_data["city"] = leyka_data["Адрес"].fillna("").str.split(",").str[0].str.strip()
-        city_users = (
-            leyka_data.groupby("city")["phone_norm"]
-            .nunique()
+        wash_loc = (
+            leyka_data.groupby(["Партнёр", "Автомойка", "Адрес"], dropna=False)
+            .agg(
+                users=("phone_norm", "nunique"),
+                tx=("phone_norm", "size"),
+            )
             .reset_index()
-            .rename(columns={"phone_norm": "users"})
-            .sort_values("users", ascending=False)
         )
-        city_users = city_users[city_users["city"] != ""]
+        wash_loc["Адрес"] = wash_loc["Адрес"].fillna("").astype(str)
+        wash_loc = wash_loc[wash_loc["Адрес"].str.strip() != ""].copy()
 
-        # Добавляем координаты
-        city_users["lat"] = city_users["city"].map(lambda c: CITY_COORDS.get(c, (None, None))[0])
-        city_users["lon"] = city_users["city"].map(lambda c: CITY_COORDS.get(c, (None, None))[1])
-        city_with_coords = city_users.dropna(subset=["lat", "lon"])
-
-        # Таблица топ-15 городов + скачивание полного списка
-        all_cities_display = city_users[["city", "users"]].rename(
-            columns={"city": "Город", "users": "Уникальных пользователей"}
+        resolved = wash_loc.apply(
+            lambda r: resolve_wash_coords(r["Адрес"], r["Партнёр"]),
+            axis=1,
         )
-        st.markdown("**Топ-15 городов по уникальным пользователям:**")
-        st.dataframe(all_cities_display.head(15), use_container_width=True, hide_index=True)
+        wash_loc["geo_label"] = resolved.map(lambda x: x[0] if x else None)
+        wash_loc["lat"] = resolved.map(lambda x: x[1] if x else None)
+        wash_loc["lon"] = resolved.map(lambda x: x[2] if x else None)
 
-        csv_all_cities = all_cities_display.to_csv(index=False, sep=";", encoding="utf-8-sig")
+        wash_on_map = wash_loc.dropna(subset=["lat", "lon"]).copy()
+        if not wash_on_map.empty:
+            keys = (
+                wash_on_map["Партнёр"].fillna("").astype(str)
+                + " | "
+                + wash_on_map["Автомойка"].fillna("").astype(str)
+                + " | "
+                + wash_on_map["Адрес"].fillna("").astype(str)
+            ).tolist()
+            spread_lat, spread_lon = spread_overlapping_points(
+                wash_on_map["lat"].tolist(),
+                wash_on_map["lon"].tolist(),
+                keys,
+            )
+            wash_on_map["latitude"] = spread_lat
+            wash_on_map["longitude"] = spread_lon
+
+            map_data = wash_on_map[["latitude", "longitude", "users"]].copy()
+            st.map(map_data, size="users", use_container_width=True)
+            st.caption(
+                f"Размер точки — уникальные пользователи мойки. "
+                f"Моек на карте: {len(wash_on_map)} из {len(wash_loc)} "
+                f"(без координат: {len(wash_loc) - len(wash_on_map)})."
+            )
+
+        wash_display = wash_loc.sort_values("users", ascending=False)[
+            ["Партнёр", "Автомойка", "Адрес", "geo_label", "users", "tx"]
+        ].rename(
+            columns={
+                "geo_label": "Город/НП (гео)",
+                "users": "Уник. пользователей",
+                "tx": "Транзакций",
+            }
+        )
+        st.markdown("**Активные мойки (по убыванию пользователей):**")
+        st.dataframe(wash_display.head(30), use_container_width=True, hide_index=True)
+
+        csv_washes = wash_display.to_csv(index=False, sep=";", encoding="utf-8-sig")
         st.download_button(
-            label=f"📥 Скачать все города ({len(all_cities_display)})",
-            data=csv_all_cities,
-            file_name="active_users_by_city.csv",
+            label=f"📥 Скачать все активные мойки ({len(wash_display)})",
+            data=csv_washes,
+            file_name="active_washes_on_map.csv",
             mime="text/csv",
         )
 
-        # Карта
-        if not city_with_coords.empty:
-            # st.map ожидает latitude/longitude
-            map_data = city_with_coords[["lat", "lon", "users"]].copy()
-            map_data = map_data.rename(columns={"lat": "latitude", "lon": "longitude"})
-            st.map(map_data, size="users", use_container_width=True)
-            st.caption(
-                f"Размер точки — количество уникальных пользователей. "
-                f"Городов на карте: {len(city_with_coords)} из {len(city_users)}"
+        # Сводка по городам/НП (для менеджера: СПб и область отдельно)
+        city_summary = (
+            wash_loc.dropna(subset=["geo_label"])
+            .groupby("geo_label", as_index=False)
+            .agg(
+                washes=("Адрес", "nunique"),
+                users=("users", "sum"),
+                tx=("tx", "sum"),
             )
+            .sort_values("users", ascending=False)
+            .rename(
+                columns={
+                    "geo_label": "Город / НП",
+                    "washes": "Активных моек",
+                    "users": "Уник. польз. (сумма по мойкам)*",
+                    "tx": "Транзакций",
+                }
+            )
+        )
+        with st.expander("Сводка по городам / населённым пунктам", expanded=False):
+            st.caption(
+                "*Сумма пользователей по мойкам может быть выше уникальных людей в городе "
+                "(клиент мог мыться на нескольких мойках)."
+            )
+            st.dataframe(city_summary, use_container_width=True, hide_index=True)
 
-        # Города без координат
-        missing = city_users[city_users["lat"].isna()]["city"].tolist()
-        if missing:
-            with st.expander(f"⚠️ Города без координат ({len(missing)})", expanded=False):
-                for c in missing:
-                    st.write(f"- {c}")
+        missing_washes = wash_loc[wash_loc["lat"].isna()][
+            ["Партнёр", "Автомойка", "Адрес"]
+        ]
+        if not missing_washes.empty:
+            with st.expander(
+                f"⚠️ Мойки без координат ({len(missing_washes)})",
+                expanded=False,
+            ):
+                st.dataframe(missing_washes, use_container_width=True, hide_index=True)
     else:
         st.info("Нет данных для отображения карты.")
 

@@ -97,7 +97,11 @@ CITY_COORDS: dict[str, tuple[float, float]] = {
     "Самара": (53.1959, 50.1002),
     "Самара южное шоссе 3в": (53.1959, 50.1002),
     "Санкт-Петербург": (59.9343, 30.3351),
+    "Санкт Петербург": (59.9343, 30.3351),
     "Саранск": (54.1875, 45.1749),
+    "Мурино": (60.0459, 30.4390),
+    "Всеволожск": (60.0201, 30.6456),
+    "Бугры": (60.07, 30.37),
     "Саратов": (51.5924, 46.0342),
     "Сергиев Посад": (56.3000, 38.1333),
     "Симферополь": (44.9481, 34.1042),
@@ -139,11 +143,25 @@ CITY_COORDS: dict[str, tuple[float, float]] = {
 }
 
 
+def _normalize_city_name(city: str) -> str:
+    """Унификация написаний города для поиска в справочнике."""
+    c = (city or "").strip()
+    if not c:
+        return ""
+    aliases = {
+        "Санкт Петербург": "Санкт-Петербург",
+        "Ростов на Дону": "Ростов-на-Дону",
+        "п. Бугры": "п. Бугры",
+        "Бугры": "п. Бугры",
+    }
+    return aliases.get(c, c)
+
+
 def find_city_coords(address: str) -> tuple[str, float, float] | None:
     """Извлечь город из адреса (первый сегмент до запятой) и найти координаты."""
     if not address:
         return None
-    city = address.split(",")[0].strip()
+    city = _normalize_city_name(address.split(",")[0].strip())
     if city in CITY_COORDS:
         lat, lon = CITY_COORDS[city]
         return city, lat, lon
@@ -151,3 +169,70 @@ def find_city_coords(address: str) -> tuple[str, float, float] | None:
         if name in city or city in name:
             return name, lat, lon
     return None
+
+
+def partner_city_name(partner: str) -> str:
+    """Город из строки партнёра вида «... г. Санкт-Петербург»."""
+    import re
+
+    if not partner:
+        return ""
+    m = re.search(r"г\.\s*(.+)$", str(partner).strip())
+    if not m:
+        return ""
+    return _normalize_city_name(m.group(1).strip())
+
+
+def resolve_wash_coords(
+    address: str, partner: str = ""
+) -> tuple[str, float, float] | None:
+    """
+    Координаты локации мойки:
+    1) город/НП из адреса (до запятой),
+    2) fallback — город из поля «Партнёр» (г. …).
+    Возвращает (метка_локации, lat, lon).
+    """
+    found = find_city_coords(address or "")
+    if found:
+        return found
+    p_city = partner_city_name(partner)
+    if p_city and p_city in CITY_COORDS:
+        lat, lon = CITY_COORDS[p_city]
+        return p_city, lat, lon
+    if p_city:
+        for name, (lat, lon) in CITY_COORDS.items():
+            if name in p_city or p_city in name:
+                return name, lat, lon
+    return None
+
+
+def spread_overlapping_points(
+    lats: list[float],
+    lons: list[float],
+    keys: list[str],
+    radius_deg: float = 0.012,
+) -> tuple[list[float], list[float]]:
+    """
+    Развести точки с одинаковыми координатами по кругу,
+    чтобы на карте были видны отдельные мойки одного города.
+    """
+    import math
+    from collections import defaultdict
+
+    groups: dict[tuple[float, float], list[int]] = defaultdict(list)
+    for i, (la, lo) in enumerate(zip(lats, lons)):
+        groups[(round(la, 5), round(lo, 5))].append(i)
+
+    out_lat = list(lats)
+    out_lon = list(lons)
+    for _, idxs in groups.items():
+        if len(idxs) <= 1:
+            continue
+        n = len(idxs)
+        # стабильный порядок по ключу мойки
+        idxs_sorted = sorted(idxs, key=lambda i: keys[i])
+        for k, i in enumerate(idxs_sorted):
+            angle = 2 * math.pi * k / n
+            out_lat[i] = lats[i] + radius_deg * math.cos(angle)
+            out_lon[i] = lons[i] + radius_deg * math.sin(angle)
+    return out_lat, out_lon
